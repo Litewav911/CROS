@@ -18,23 +18,23 @@ print(
 )
 
 print(
-    f"Actual income: "
-    f"${result['actual_income']:,.2f}"
+    f"Transaction income: "
+    f"${result['transaction_income']:,.2f}"
 )
 
 print(
-    f"Net cash requirement: "
-    f"${result['net_cash_requirement']:,.2f}"
+    f"Rental income: "
+    f"${result['rental_income']:,.2f}"
 )
 
 print(
-    f"Planned spending: "
-    f"${result['planned_spending']:,.2f}"
+    f"Total cash available: "
+    f"${result['total_cash_available']:,.2f}"
 )
 
 print(
-    f"Spending variance: "
-    f"${result['spending_variance']:,.2f}"
+    f"Preliminary portfolio requirement: "
+    f"${result['preliminary_portfolio_requirement']:,.2f}"
 )
 
 
@@ -44,20 +44,34 @@ assert (
 )
 
 assert (
-    result["actual_income"]
+    result["transaction_income"]
     == Decimal("4250.00")
 )
 
 assert (
-    result["net_cash_requirement"]
-    == Decimal("-3811.76")
+    result["rental_income"].quantize(
+        Decimal("0.01")
+    )
+    == Decimal("2886.34")
 )
 
 assert (
-    result["planned_spending"]
-    == Decimal("11000")
+    result["total_cash_available"].quantize(
+        Decimal("0.01")
+    )
+    == Decimal("7136.34")
+)
+
+assert (
+    result["preliminary_portfolio_requirement"].quantize(
+        Decimal("0.01")
+    )
+    == Decimal("-6698.10")
 )
 
 
 print()
-print("PASS: Retirement cash-flow calculations are correct.")
+print(
+    "PASS: Retirement cash-flow calculations "
+    "include rental cash flow correctly."
+)
