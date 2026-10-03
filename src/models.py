@@ -196,6 +196,14 @@ class Transaction(Base):
         String(100)
     )
 
+    category_override: Mapped[str | None] = mapped_column(
+        String(100)
+    )
+
+    merchant_override: Mapped[str | None] = mapped_column(
+        String(255)
+    )
+
     merchant: Mapped[str | None] = mapped_column(
         String(255)
     )
