@@ -2,6 +2,7 @@ from datetime import date, datetime
 from decimal import Decimal
 
 from sqlalchemy import (
+    Boolean,
     Date,
     DateTime,
     ForeignKey,
@@ -74,12 +75,10 @@ class SourceTransaction(Base):
         Numeric(15, 2)
     )
 
-    # Exact original CSV row as text.
     raw_row_text: Mapped[str] = mapped_column(
         Text
     )
 
-    # Parsed representation of the original row.
     original_data: Mapped[str] = mapped_column(
         Text
     )
@@ -119,12 +118,48 @@ class Account(Base):
     )
 
     is_active: Mapped[bool] = mapped_column(
-        default=True
+        Boolean,
+        default=True,
     )
 
     transactions = relationship(
         "Transaction",
         back_populates="account",
+    )
+
+
+class CategoryRule(Base):
+    __tablename__ = "category_rules"
+
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
+
+    keyword: Mapped[str] = mapped_column(
+        String(255)
+    )
+
+    category: Mapped[str] = mapped_column(
+        String(100)
+    )
+
+    merchant: Mapped[str | None] = mapped_column(
+        String(255)
+    )
+
+    transaction_type: Mapped[str] = mapped_column(
+        String(50)
+    )
+
+    priority: Mapped[int] = mapped_column(
+        Integer,
+        default=100,
+    )
+
+    active: Mapped[bool] = mapped_column(
+        Boolean,
+        default=True,
     )
 
 
