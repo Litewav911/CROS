@@ -18,13 +18,27 @@ from database import Base
 class SourceDocument(Base):
     __tablename__ = "source_documents"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
 
-    filename: Mapped[str] = mapped_column(String(255))
-    file_type: Mapped[str] = mapped_column(String(50))
-    file_hash: Mapped[str] = mapped_column(String(64), unique=True)
+    filename: Mapped[str] = mapped_column(
+        String(255)
+    )
 
-    imported_at: Mapped[datetime] = mapped_column(DateTime)
+    file_type: Mapped[str] = mapped_column(
+        String(50)
+    )
+
+    file_hash: Mapped[str] = mapped_column(
+        String(64),
+        unique=True,
+    )
+
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime
+    )
 
     source_transactions = relationship(
         "SourceTransaction",
@@ -35,24 +49,44 @@ class SourceDocument(Base):
 class SourceTransaction(Base):
     __tablename__ = "source_transactions"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
 
     source_document_id: Mapped[int] = mapped_column(
         ForeignKey("source_documents.id")
     )
 
-    source_row_number: Mapped[int | None] = mapped_column(Integer)
+    source_row_number: Mapped[int | None] = mapped_column(
+        Integer
+    )
 
-    transaction_date: Mapped[date | None] = mapped_column(Date)
-    original_description: Mapped[str | None] = mapped_column(Text)
+    transaction_date: Mapped[date | None] = mapped_column(
+        Date
+    )
+
+    original_description: Mapped[str | None] = mapped_column(
+        Text
+    )
 
     original_amount: Mapped[Decimal | None] = mapped_column(
         Numeric(15, 2)
     )
 
-    original_data: Mapped[str] = mapped_column(Text)
+    # Exact original CSV row as text.
+    raw_row_text: Mapped[str] = mapped_column(
+        Text
+    )
 
-    imported_at: Mapped[datetime] = mapped_column(DateTime)
+    # Parsed representation of the original row.
+    original_data: Mapped[str] = mapped_column(
+        Text
+    )
+
+    imported_at: Mapped[datetime] = mapped_column(
+        DateTime
+    )
 
     source_document = relationship(
         "SourceDocument",
@@ -63,10 +97,18 @@ class SourceTransaction(Base):
 class Account(Base):
     __tablename__ = "accounts"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
 
-    name: Mapped[str] = mapped_column(String(255))
-    account_type: Mapped[str] = mapped_column(String(50))
+    name: Mapped[str] = mapped_column(
+        String(255)
+    )
+
+    account_type: Mapped[str] = mapped_column(
+        String(50)
+    )
 
     institution: Mapped[str | None] = mapped_column(
         String(255)
@@ -76,7 +118,9 @@ class Account(Base):
         String(4)
     )
 
-    is_active: Mapped[bool] = mapped_column(default=True)
+    is_active: Mapped[bool] = mapped_column(
+        default=True
+    )
 
     transactions = relationship(
         "Transaction",
@@ -87,7 +131,10 @@ class Account(Base):
 class Transaction(Base):
     __tablename__ = "transactions"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    id: Mapped[int] = mapped_column(
+        Integer,
+        primary_key=True,
+    )
 
     source_transaction_id: Mapped[int] = mapped_column(
         ForeignKey("source_transactions.id"),
@@ -98,9 +145,13 @@ class Transaction(Base):
         ForeignKey("accounts.id")
     )
 
-    transaction_date: Mapped[date | None] = mapped_column(Date)
+    transaction_date: Mapped[date | None] = mapped_column(
+        Date
+    )
 
-    description: Mapped[str | None] = mapped_column(Text)
+    description: Mapped[str | None] = mapped_column(
+        Text
+    )
 
     amount: Mapped[Decimal | None] = mapped_column(
         Numeric(15, 2)
@@ -114,7 +165,9 @@ class Transaction(Base):
         String(255)
     )
 
-    notes: Mapped[str | None] = mapped_column(Text)
+    notes: Mapped[str | None] = mapped_column(
+        Text
+    )
 
     account = relationship(
         "Account",
