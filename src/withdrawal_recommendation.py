@@ -66,6 +66,84 @@ def calculate_withdrawal_recommendation(
     }
 
 
+def build_account_withdrawal(
+    recommendation: dict,
+):
+    """
+    Convert a withdrawal recommendation into the
+    account-specific withdrawal structure expected
+    by the portfolio projection engine.
+
+    Example:
+
+        {
+            "Chris 401(k)": Decimal("60000")
+        }
+
+    If no withdrawal is required, an empty dictionary
+    is returned.
+    """
+
+    amount = Decimal(
+        str(
+            recommendation[
+                "portfolio_withdrawal"
+            ]
+        )
+    )
+
+    source = recommendation[
+        "recommended_source"
+    ]
+
+    if amount <= 0:
+        return {}
+
+    if source == "None":
+        return {}
+
+    return {
+        source: amount
+    }
+
+
+def calculate_account_withdrawal(
+    year: int,
+    month: int,
+    market_decline: bool = False,
+):
+    """
+    Calculate the retirement withdrawal recommendation
+    and convert it into an account-specific withdrawal.
+
+    This function does not change the recommendation
+    logic. It simply connects the recommendation
+    to the portfolio projection layer.
+    """
+
+    recommendation = (
+        calculate_withdrawal_recommendation(
+            year,
+            month,
+            market_decline,
+        )
+    )
+
+    account_withdrawal = (
+        build_account_withdrawal(
+            recommendation
+        )
+    )
+
+    return {
+        "recommendation":
+            recommendation,
+
+        "account_withdrawal":
+            account_withdrawal,
+    }
+
+
 def print_recommendation(
     year: int,
     month: int,
