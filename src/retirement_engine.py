@@ -14,9 +14,7 @@ from roth_conversion_integration import (
     calculate_roth_conversion,
 )
 from tax_engine import (
-    calculate_incremental_tax,
-    FEDERAL_MFJ_2026_BRACKETS,
-    NC_TAX_RATE,
+    calculate_withdrawal_tax_mfj_2026,
 )
 
 
@@ -327,6 +325,9 @@ def _withdrawal_tax(
     """
     Calculate incremental tax caused by a traditional
     tax-deferred withdrawal.
+
+    All federal and North Carolina tax calculations are
+    delegated to the tax engine.
     """
 
     withdrawal_amount = _to_decimal(
@@ -336,25 +337,14 @@ def _withdrawal_tax(
     if withdrawal_amount <= ZERO:
         return ZERO
 
-    taxable_before_withdrawal = (
-        base_taxable_income
-        + conversion_amount
+    result = calculate_withdrawal_tax_mfj_2026(
+        base_taxable_income=base_taxable_income,
+        conversion_amount=conversion_amount,
+        withdrawal_amount=withdrawal_amount,
     )
 
-    federal_tax = calculate_incremental_tax(
-        taxable_before_withdrawal,
-        withdrawal_amount,
-        FEDERAL_MFJ_2026_BRACKETS,
-    )
-
-    nc_tax = (
-        withdrawal_amount
-        * NC_TAX_RATE
-    )
-
-    return (
-        federal_tax
-        + nc_tax
+    return _to_decimal(
+        result.tax
     )
 
 
@@ -705,17 +695,6 @@ def _portfolio_cash_requirement(
     """
     Determine the portfolio withdrawal requirement.
 
-    Planned spending is the household spending target.
-
-    Outside income such as rental income, transaction income,
-    and Social Security is available to fund that spending
-    and therefore reduces the amount required from the
-    investment portfolio.
-
-    Roth-conversion tax is added separately when the
-    configuration says that the tax is funded from the
-    portfolio.
-
     Formula:
 
         portfolio cash need =
@@ -839,26 +818,6 @@ def run_retirement_engine(
             + rental_income
             + social_security
         )
-
-        # --------------------------------------------------
-        # CROS CASH-FLOW RULE
-        #
-        # The retirement spending target represents total
-        # household spending, not an amount that must be
-        # supplied entirely by the portfolio.
-        #
-        # Outside income available during the year therefore
-        # reduces the amount that the portfolio must supply.
-        #
-        # Example:
-        #
-        #   Spending:       $132,000
-        #   Outside income:  $30,000
-        #   Portfolio need: $102,000
-        #
-        # Roth-conversion tax is added afterward when that tax
-        # is funded from the portfolio.
-        # --------------------------------------------------
 
         net_spending_need = max(
             ZERO,

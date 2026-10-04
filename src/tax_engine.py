@@ -171,14 +171,14 @@ def calculate_flat_tax(
 
 def calculate_incremental_tax(
     base_taxable_income: Decimal,
-    conversion_amount: Decimal,
+    additional_income: Decimal,
     brackets: List[TaxBracket],
 ) -> Decimal:
     """
-    Calculate the additional tax created by a
-    Roth conversion.
+    Calculate the additional progressive tax created by
+    additional taxable income.
 
-    Tax(base income + conversion)
+    Tax(base income + additional income)
     minus
     Tax(base income)
     """
@@ -187,8 +187,8 @@ def calculate_incremental_tax(
         str(base_taxable_income)
     )
 
-    conversion_amount = Decimal(
-        str(conversion_amount)
+    additional_income = Decimal(
+        str(additional_income)
     )
 
     if base_taxable_income < 0:
@@ -196,9 +196,9 @@ def calculate_incremental_tax(
             "Base taxable income cannot be negative."
         )
 
-    if conversion_amount < 0:
+    if additional_income < 0:
         raise ValueError(
-            "Conversion amount cannot be negative."
+            "Additional income cannot be negative."
         )
 
     base_tax = calculate_progressive_tax(
@@ -206,48 +206,58 @@ def calculate_incremental_tax(
         brackets,
     )
 
-    converted_tax = calculate_progressive_tax(
+    combined_tax = calculate_progressive_tax(
         base_taxable_income
-        + conversion_amount,
+        + additional_income,
         brackets,
     )
 
     return (
-        converted_tax
+        combined_tax
         - base_tax
     )
 
 
 def calculate_nc_incremental_tax(
     base_taxable_income: Decimal,
-    conversion_amount: Decimal,
+    additional_income: Decimal,
 ) -> Decimal:
     """
-    Calculate incremental North Carolina tax
-    caused by a Roth conversion.
+    Calculate incremental North Carolina tax caused by
+    additional taxable income.
     """
 
     base_taxable_income = Decimal(
         str(base_taxable_income)
     )
 
-    conversion_amount = Decimal(
-        str(conversion_amount)
+    additional_income = Decimal(
+        str(additional_income)
     )
+
+    if base_taxable_income < 0:
+        raise ValueError(
+            "Base taxable income cannot be negative."
+        )
+
+    if additional_income < 0:
+        raise ValueError(
+            "Additional income cannot be negative."
+        )
 
     base_tax = calculate_flat_tax(
         base_taxable_income,
         NC_TAX_RATE,
     )
 
-    converted_tax = calculate_flat_tax(
+    combined_tax = calculate_flat_tax(
         base_taxable_income
-        + conversion_amount,
+        + additional_income,
         NC_TAX_RATE,
     )
 
     return (
-        converted_tax
+        combined_tax
         - base_tax
     )
 
@@ -257,8 +267,8 @@ def calculate_taxable_income(
     standard_deduction: Decimal,
 ) -> Decimal:
     """
-    Calculate taxable income after the
-    supplied standard deduction.
+    Calculate taxable income after the supplied
+    standard deduction.
     """
 
     gross_income = Decimal(
@@ -302,16 +312,16 @@ def calculate_federal_tax_mfj_2026(
 
 def calculate_federal_incremental_tax_mfj_2026(
     base_taxable_income: Decimal,
-    conversion_amount: Decimal,
+    additional_income: Decimal,
 ) -> Decimal:
     """
-    Calculate the incremental federal tax
-    caused by a Roth conversion.
+    Calculate incremental federal tax caused by
+    additional taxable income.
     """
 
     return calculate_incremental_tax(
         base_taxable_income,
-        conversion_amount,
+        additional_income,
         FEDERAL_MFJ_2026_BRACKETS,
     )
 
@@ -321,9 +331,17 @@ def calculate_conversion_tax_mfj_2026(
     conversion_amount: Decimal,
 ) -> TaxResult:
     """
-    Calculate combined federal and NC
-    incremental Roth-conversion tax.
+    Calculate combined federal and NC incremental tax
+    caused by a Roth conversion.
     """
+
+    base_taxable_income = Decimal(
+        str(base_taxable_income)
+    )
+
+    conversion_amount = Decimal(
+        str(conversion_amount)
+    )
 
     federal_tax = (
         calculate_federal_incremental_tax_mfj_2026(
@@ -341,6 +359,89 @@ def calculate_conversion_tax_mfj_2026(
         taxable_income=(
             base_taxable_income
             + conversion_amount
+        ),
+        tax=(
+            federal_tax
+            + nc_tax
+        ),
+    )
+
+
+def calculate_withdrawal_tax_mfj_2026(
+    base_taxable_income: Decimal,
+    conversion_amount: Decimal,
+    withdrawal_amount: Decimal,
+) -> TaxResult:
+    """
+    Calculate the incremental federal and North Carolina
+    tax caused by a traditional tax-deferred withdrawal.
+
+    The Roth conversion is treated as already included in
+    taxable income before the withdrawal.
+
+    Therefore:
+
+        taxable income before withdrawal =
+            base taxable income
+            + Roth conversion
+
+        withdrawal tax =
+            Tax(base + conversion + withdrawal)
+            - Tax(base + conversion)
+
+    North Carolina is calculated using its flat tax rate.
+
+    This function is the public tax-engine interface used
+    by the retirement engine for tax-deferred withdrawals.
+    """
+
+    base_taxable_income = Decimal(
+        str(base_taxable_income)
+    )
+
+    conversion_amount = Decimal(
+        str(conversion_amount)
+    )
+
+    withdrawal_amount = Decimal(
+        str(withdrawal_amount)
+    )
+
+    if base_taxable_income < 0:
+        raise ValueError(
+            "Base taxable income cannot be negative."
+        )
+
+    if conversion_amount < 0:
+        raise ValueError(
+            "Conversion amount cannot be negative."
+        )
+
+    if withdrawal_amount < 0:
+        raise ValueError(
+            "Withdrawal amount cannot be negative."
+        )
+
+    taxable_before_withdrawal = (
+        base_taxable_income
+        + conversion_amount
+    )
+
+    federal_tax = calculate_incremental_tax(
+        taxable_before_withdrawal,
+        withdrawal_amount,
+        FEDERAL_MFJ_2026_BRACKETS,
+    )
+
+    nc_tax = calculate_nc_incremental_tax(
+        taxable_before_withdrawal,
+        withdrawal_amount,
+    )
+
+    return TaxResult(
+        taxable_income=(
+            taxable_before_withdrawal
+            + withdrawal_amount
         ),
         tax=(
             federal_tax
@@ -369,17 +470,20 @@ if __name__ == "__main__":
 
     conversion = Decimal("80000")
 
-    federal_conversion_tax = (
-        calculate_federal_incremental_tax_mfj_2026(
+    conversion_result = (
+        calculate_conversion_tax_mfj_2026(
             federal_taxable_income,
             conversion,
         )
     )
 
-    nc_conversion_tax = (
-        calculate_nc_incremental_tax(
-            nc_taxable_income,
+    withdrawal = Decimal("50000")
+
+    withdrawal_result = (
+        calculate_withdrawal_tax_mfj_2026(
+            federal_taxable_income,
             conversion,
+            withdrawal,
         )
     )
 
@@ -408,19 +512,16 @@ if __name__ == "__main__":
     )
 
     print(
-        f"{'Federal conversion tax':35}"
-        f"${federal_conversion_tax:,.2f}"
+        f"{'Federal + NC conversion tax':35}"
+        f"${conversion_result.tax:,.2f}"
     )
 
     print(
-        f"{'NC conversion tax':35}"
-        f"${nc_conversion_tax:,.2f}"
+        f"{'Test tax-deferred withdrawal':35}"
+        f"${withdrawal:,.2f}"
     )
 
     print(
-        f"{'Total conversion tax':35}"
-        f"${(
-            federal_conversion_tax
-            + nc_conversion_tax
-        ):,.2f}"
+        f"{'Withdrawal tax after conversion':35}"
+        f"${withdrawal_result.tax:,.2f}"
     )
