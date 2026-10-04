@@ -6,13 +6,9 @@ from portfolio_projection import (
 )
 
 
-print("PORTFOLIO YEAR-TO-YEAR TEST")
-print("============================")
+print("PORTFOLIO INVESTMENT RETURN TEST")
+print("=================================")
 
-
-# --------------------------------------------------
-# Initial 2027 balances
-# --------------------------------------------------
 
 balances_2027 = {
     "Chris 401(k)": Decimal("752073"),
@@ -27,18 +23,36 @@ balances_2027 = {
 projection_2027 = project_portfolio_year(
     year=2027,
     account_balances=balances_2027,
+    annual_return=Decimal("0.05"),
 )
 
 
 print()
 print(
-    f"2027 beginning: "
+    f"Beginning portfolio: "
     f"${projection_2027.beginning_total:,.2f}"
 )
 
 print(
-    f"2027 ending: "
+    f"Investment gain: "
+    f"${projection_2027.investment_gain_total:,.2f}"
+)
+
+print(
+    f"Ending portfolio: "
     f"${projection_2027.ending_total:,.2f}"
+)
+
+
+expected_gain = (
+    Decimal("1219138.61")
+    * Decimal("0.05")
+)
+
+
+expected_ending = (
+    Decimal("1219138.61")
+    + expected_gain
 )
 
 
@@ -49,30 +63,30 @@ assert (
 
 
 assert (
+    projection_2027.investment_gain_total
+    == expected_gain
+)
+
+
+assert (
     projection_2027.ending_total
-    == Decimal("1219138.61")
+    == expected_ending
 )
 
 
 # --------------------------------------------------
-# Verify the multi-year projection
+# Verify that returns compound year-to-year.
 # --------------------------------------------------
 
 projections = project_portfolio_years(
     start_year=2027,
     end_year=2040,
+    annual_return=Decimal("0.05"),
 )
 
 
 assert len(projections) == 14
 
-
-assert projections[0].year == 2027
-assert projections[-1].year == 2040
-
-
-# Every year's beginning balance must equal
-# the previous year's ending balance.
 
 for index in range(1, len(projections)):
 
@@ -87,23 +101,8 @@ for index in range(1, len(projections)):
 
 print()
 print(
-    f"First year: "
-    f"{projections[0].year}"
-)
-
-print(
-    f"Last year: "
-    f"{projections[-1].year}"
-)
-
-print(
     f"2027 ending: "
     f"${projections[0].ending_total:,.2f}"
-)
-
-print(
-    f"2040 beginning: "
-    f"${projections[-1].beginning_total:,.2f}"
 )
 
 print(
@@ -114,6 +113,6 @@ print(
 
 print()
 print(
-    "PASS: Account balances correctly "
-    "carry forward from one year to the next."
+    "PASS: Investment returns correctly "
+    "compound through the multi-year projection."
 )

@@ -28,15 +28,19 @@ class PortfolioProjection:
 def project_portfolio_year(
     year: int,
     account_balances: dict[str, Decimal],
+    annual_return: Decimal = Decimal("0"),
 ) -> PortfolioProjection:
     """
     Project all modeled retirement accounts for one year.
 
-    account_balances contains the beginning balance
-    for each account.
+    annual_return is expressed as a decimal.
 
-    The ending balances can then be passed into the
-    next year's projection.
+    Example:
+        Decimal("0.05") = 5%
+        Decimal("0.06") = 6%
+
+    The return is applied to each account's beginning
+    balance for this initial projection engine.
     """
 
     account_projections = []
@@ -58,11 +62,16 @@ def project_portfolio_year(
             )
         )
 
+        investment_gain = (
+            beginning_balance
+            * annual_return
+        )
+
         projection = project_account_year(
             year=year,
             account_name=account.name,
             beginning_balance=beginning_balance,
-            investment_gain=Decimal("0"),
+            investment_gain=investment_gain,
             withdrawal=Decimal("0"),
             roth_conversion=Decimal("0"),
         )
@@ -119,6 +128,7 @@ def create_initial_account_balances():
 def project_portfolio_years(
     start_year: int,
     end_year: int,
+    annual_return: Decimal = Decimal("0"),
 ):
     """
     Project the portfolio across multiple years.
@@ -141,6 +151,7 @@ def project_portfolio_years(
         projection = project_portfolio_year(
             year=year,
             account_balances=account_balances,
+            annual_return=annual_return,
         )
 
         projections.append(
@@ -171,24 +182,27 @@ def print_portfolio_projection(
     print(
         f"{'Account':30}"
         f"{'Beginning':>18}"
+        f"{'Gain':>18}"
         f"{'Ending':>18}"
     )
 
-    print("-" * 80)
+    print("-" * 85)
 
     for account in projection.accounts:
 
         print(
             f"{account.account_name:30}"
             f"${account.beginning_balance:>16,.2f}"
+            f"${account.investment_gain:>16,.2f}"
             f"${account.ending_balance:>16,.2f}"
         )
 
-    print("-" * 80)
+    print("-" * 85)
 
     print(
         f"{'TOTAL PORTFOLIO':30}"
         f"${projection.beginning_total:>16,.2f}"
+        f"${projection.investment_gain_total:>16,.2f}"
         f"${projection.ending_total:>16,.2f}"
     )
 
@@ -198,6 +212,7 @@ if __name__ == "__main__":
     projections = project_portfolio_years(
         start_year=2027,
         end_year=2040,
+        annual_return=Decimal("0.05"),
     )
 
     for projection in projections:
@@ -205,6 +220,8 @@ if __name__ == "__main__":
         print(
             f"{projection.year}: "
             f"${projection.beginning_total:,.2f}"
-            f" -> "
+            f" + "
+            f"${projection.investment_gain_total:,.2f}"
+            f" = "
             f"${projection.ending_total:,.2f}"
         )
