@@ -21,18 +21,13 @@ from tax_engine import (
 
 
 ZERO = Decimal("0")
+ONE = Decimal("1")
 
 
 @dataclass
 class RetirementEngineConfig:
     """
-    Configuration for the stateful 2027-2040 retirement engine.
-
-    The engine deliberately does not invent account balances,
-    Social Security claiming dates, Roth conversion schedules,
-    brokerage balances, or cash-reserve balances.
-
-    Those items are supplied as explicit inputs.
+    Configuration for the stateful CROS retirement engine.
     """
 
     start_year: int = 2027
@@ -82,6 +77,14 @@ class RetirementEngineConfig:
 class RetirementYearResult:
     """
     Complete state transition for one retirement year.
+
+    Outside income is reported separately from the portfolio
+    withdrawal requirement.
+
+    Outside income does not reduce the planned retirement
+    spending withdrawal requirement.
+
+    Roth conversions remain portfolio-neutral transfers.
     """
 
     year: int
@@ -95,6 +98,10 @@ class RetirementYearResult:
     rental_income: Decimal
 
     social_security: Decimal
+
+    outside_income: Decimal
+
+    net_spending_need: Decimal
 
     conversion_amount: Decimal
 
@@ -128,6 +135,7 @@ def _to_decimal(value) -> Decimal:
 def _days_in_year(year: int) -> int:
     start = date(year, 1, 1)
     end = date(year + 1, 1, 1)
+
     return (end - start).days
 
 
@@ -136,19 +144,19 @@ def _planned_spending_for_year(
     year: int,
 ) -> Decimal:
     """
-    Calculate the retirement spending target for a year.
+    Calculate annual planned spending.
 
-    The first retirement year may be prorated from the actual
-    retirement start date through December 31.
-
-    All later years receive the full annual target.
+    The first retirement year is prorated from the actual
+    retirement date through December 31 when enabled.
     """
 
     monthly_target = _to_decimal(
         config.monthly_spending_target
     )
 
-    annual_target = monthly_target * Decimal("12")
+    annual_target = (
+        monthly_target * Decimal("12")
+    )
 
     if (
         not config.prorate_first_retirement_year
@@ -179,9 +187,10 @@ def _default_rental_income(
     year: int,
 ) -> Decimal:
     """
-    Rental income is modeled independently of the retirement
-    start date because the rental properties operate throughout
-    the year.
+    Rental properties operate throughout the year,
+    independent of the retirement start date.
+
+    The year argument is retained for interface consistency.
     """
 
     monthly = monthly_rental_cashflow()
@@ -245,25 +254,37 @@ def _base_taxable_income(
     )
 
 
-def _conversion_tax(
+def _conversion_tax_for_account(
     year: int,
+    source_account: str,
     base_taxable_income: Decimal,
     conversion_amount: Decimal,
 ) -> Decimal:
     """
-    Calculate the incremental federal + NC tax generated
-    by the Roth conversion.
-
-    The existing CROS Roth conversion integration remains
-    authoritative for this calculation.
+    Calculate incremental federal + NC tax for one
+    Roth conversion.
     """
+
+    conversion_amount = _to_decimal(
+        conversion_amount
+    )
 
     if conversion_amount <= ZERO:
         return ZERO
 
+    account = get_account(
+        source_account
+    )
+
+    if not account.roth_conversion_allowed:
+        raise ValueError(
+            f"Roth conversion is not allowed "
+            f"from {source_account}."
+        )
+
     result = calculate_roth_conversion(
         year=year,
-        source_account="Chris 401(k)",
+        source_account=source_account,
         destination_account="Roth IRA",
         base_taxable_income=base_taxable_income,
         conversion_amount=conversion_amount,
@@ -274,18 +295,44 @@ def _conversion_tax(
     )
 
 
+def _total_conversion_tax(
+    year: int,
+    base_taxable_income: Decimal,
+    roth_conversions: Mapping[str, Decimal],
+) -> Decimal:
+    """
+    Calculate total tax for all requested Roth conversions.
+    """
+
+    total_tax = ZERO
+
+    for source_account, conversion_amount in (
+        roth_conversions.items()
+    ):
+
+        total_tax += _conversion_tax_for_account(
+            year=year,
+            source_account=source_account,
+            base_taxable_income=base_taxable_income,
+            conversion_amount=conversion_amount,
+        )
+
+    return total_tax
+
+
 def _withdrawal_tax(
     base_taxable_income: Decimal,
     conversion_amount: Decimal,
     withdrawal_amount: Decimal,
 ) -> Decimal:
     """
-    Calculate the incremental tax caused by a traditional
+    Calculate incremental tax caused by a traditional
     tax-deferred withdrawal.
-
-    Conversion income is included first so the progressive
-    tax brackets are respected.
     """
+
+    withdrawal_amount = _to_decimal(
+        withdrawal_amount
+    )
 
     if withdrawal_amount <= ZERO:
         return ZERO
@@ -318,18 +365,14 @@ def _gross_up_tax_deferred_withdrawal(
     conversion_amount: Decimal,
     maximum_available: Decimal,
 ) -> tuple[Decimal, Decimal]:
-
     """
-    Find the gross traditional-account withdrawal needed
-    to produce the requested net cash after incremental tax.
-
-    Binary search is used because the federal tax is progressive.
-
-    If the account cannot satisfy the entire net need, the
-    maximum available amount is returned.
+    Find the gross tax-deferred withdrawal required to
+    produce the requested net cash.
     """
 
-    net_needed = _to_decimal(net_needed)
+    net_needed = _to_decimal(
+        net_needed
+    )
 
     maximum_available = _to_decimal(
         maximum_available
@@ -396,11 +439,10 @@ def _gross_up_tax_deferred_withdrawal(
 def _withdrawal_priority(
     market_decline: bool,
 ) -> list[str]:
-
     """
-    Determine the account priority.
+    Determine withdrawal priority.
 
-    Normal conditions:
+    Normal:
         Chris 401(k)
         Brokerage
         Cash Reserve
@@ -449,7 +491,7 @@ def _account_available_after_growth(
 
     return (
         beginning
-        * (Decimal("1") + annual_return)
+        * (ONE + annual_return)
     )
 
 
@@ -468,19 +510,12 @@ def _allocate_withdrawal(
     Decimal,
 ]:
     """
-    Allocate a required net cash amount across the withdrawal
-    priority.
+    Allocate required net cash across withdrawal priority.
 
-    Traditional withdrawals are grossed up for their incremental
-    federal and NC income tax.
+    Tax-deferred withdrawals are grossed up for tax.
 
-    Conversion amounts are reserved before withdrawals so that
-    a requested Roth conversion does not accidentally get consumed
-    by the spending withdrawal.
-
-    If the portfolio cannot satisfy the full cash requirement,
-    the function returns the maximum available withdrawal instead
-    of raising an exception.
+    Roth conversion amounts are reserved before withdrawal
+    allocation.
     """
 
     if reserved_for_conversions is None:
@@ -518,11 +553,9 @@ def _allocate_withdrawal(
             )
         )
 
-        available -= reserved
-
         available = max(
             ZERO,
-            available,
+            available - reserved,
         )
 
         if available <= ZERO:
@@ -592,18 +625,15 @@ def _cap_roth_conversions(
     annual_return: Decimal,
 ) -> dict[str, Decimal]:
     """
-    Cap each Roth conversion only against the source account's
-    available balance after investment growth.
-
-    Withdrawals are deliberately NOT subtracted here.
-
-    The withdrawal allocator separately reserves the conversion
-    amount so the two transactions can coexist.
+    Cap each requested Roth conversion at the source
+    account's post-growth balance.
     """
 
     result: dict[str, Decimal] = {}
 
-    for account_name, requested_amount in requested.items():
+    for account_name, requested_amount in (
+        requested.items()
+    ):
 
         requested_amount = _to_decimal(
             requested_amount
@@ -613,6 +643,17 @@ def _cap_roth_conversions(
             raise ValueError(
                 f"Roth conversion cannot be negative "
                 f"for {account_name}."
+            )
+
+        account = get_account(
+            account_name
+        )
+
+        if not account.roth_conversion_allowed:
+
+            raise ValueError(
+                f"Roth conversion is not allowed "
+                f"from {account_name}."
             )
 
         available = (
@@ -636,46 +677,74 @@ def _cap_roth_conversions(
     return result
 
 
+def _validate_account_balances(
+    balances: Mapping[str, Decimal],
+) -> None:
+    """
+    Reject negative starting balances.
+    """
+
+    for account_name, balance in balances.items():
+
+        balance = _to_decimal(
+            balance
+        )
+
+        if balance < ZERO:
+            raise ValueError(
+                f"Account balance cannot be negative "
+                f"for {account_name}."
+            )
+
+
+def _portfolio_cash_requirement(
+    planned_spending: Decimal,
+    conversion_tax: Decimal,
+    conversion_tax_funded_from_withdrawal: bool,
+) -> Decimal:
+    """
+    Determine the portfolio withdrawal requirement.
+
+    IMPORTANT:
+
+    Planned spending is the amount the retirement portfolio
+    is expected to fund.
+
+    Outside income such as rental income, transaction income,
+    and Social Security is tracked separately and does NOT
+    reduce the planned portfolio withdrawal requirement.
+
+    Roth-conversion tax is added when the configuration says
+    that the tax is funded from the portfolio.
+    """
+
+    tax_need = (
+        conversion_tax
+        if conversion_tax_funded_from_withdrawal
+        else ZERO
+    )
+
+    return max(
+        ZERO,
+        planned_spending
+        + tax_need,
+    )
+
+
 def run_retirement_engine(
     config: RetirementEngineConfig,
 ) -> list[RetirementYearResult]:
-
     """
     Run the stateful CROS retirement engine.
 
-    Each year's ending account balances become the next year's
+    Each year's ending balances become the following year's
     beginning balances.
 
-    The engine currently models:
-
-        - retirement spending
-        - transaction income
-        - rental income
-        - Social Security
-        - investment growth
-        - Rule-of-55 withdrawal priority
-        - market-decline cash-reserve priority
-        - traditional-account withdrawal taxes
-        - Roth conversions
-        - Roth-conversion taxes
-        - account-to-account balance carry-forward
-
-    Important behavior:
-
-        A requested Roth conversion reserves its source-account
-        balance before spending withdrawals are allocated.
-
-        If the portfolio cannot fund the complete annual spending
-        target, the engine records the available withdrawal and
-        continues the projection with depleted accounts.
-
-        This allows the engine to produce the complete requested
-        projection period even when a deliberately undersized
-        test portfolio reaches zero.
+    Outside income is reported but does not reduce the
+    retirement spending withdrawal requirement.
     """
 
     if config.start_year > config.end_year:
-
         raise ValueError(
             "start_year cannot be greater than end_year."
         )
@@ -685,7 +754,6 @@ def run_retirement_engine(
     )
 
     if annual_return < ZERO:
-
         raise ValueError(
             "annual_return cannot be negative."
         )
@@ -703,6 +771,10 @@ def run_retirement_engine(
             for name, balance
             in config.initial_balances.items()
         }
+
+    _validate_account_balances(
+        account_balances
+    )
 
     results: list[RetirementYearResult] = []
 
@@ -733,6 +805,27 @@ def run_retirement_engine(
             year,
         )
 
+        outside_income = (
+            transaction_income
+            + rental_income
+            + social_security
+        )
+
+        # --------------------------------------------------
+        # IMPORTANT CROS PLAN RULE
+        #
+        # Outside income is informational.
+        #
+        # Rental income, transaction income, and Social
+        # Security do NOT reduce the portfolio-funded
+        # spending target.
+        #
+        # The $11,000/month retirement spending target is
+        # therefore modeled independently of outside income.
+        # --------------------------------------------------
+
+        net_spending_need = planned_spending
+
         base_taxable_income = (
             _base_taxable_income(
                 config,
@@ -740,7 +833,7 @@ def run_retirement_engine(
             )
         )
 
-        market_decline = (
+        market_decline = bool(
             config.market_declines_by_year.get(
                 year,
                 False,
@@ -756,14 +849,6 @@ def run_retirement_engine(
             ).items()
         }
 
-        # --------------------------------------------------
-        # Determine actual Roth conversion amounts.
-        #
-        # A conversion is capped only by the source account's
-        # post-growth balance. Withdrawals are handled separately
-        # and must respect these reserved conversion amounts.
-        # --------------------------------------------------
-
         roth_conversions = _cap_roth_conversions(
             requested_conversions,
             beginning_balances,
@@ -775,42 +860,19 @@ def run_retirement_engine(
             ZERO,
         )
 
-        conversion_tax = _conversion_tax(
-            year,
-            base_taxable_income,
-            actual_conversion_amount,
+        conversion_tax = _total_conversion_tax(
+            year=year,
+            base_taxable_income=base_taxable_income,
+            roth_conversions=roth_conversions,
         )
 
-        # --------------------------------------------------
-        # Determine cash required from the portfolio.
-        #
-        # Conversion tax is treated as a cash requirement when
-        # configured to be funded from portfolio withdrawals.
-        # --------------------------------------------------
-
-        total_non_portfolio_income = (
-            transaction_income
-            + rental_income
-            + social_security
+        cash_need = _portfolio_cash_requirement(
+            planned_spending=net_spending_need,
+            conversion_tax=conversion_tax,
+            conversion_tax_funded_from_withdrawal=(
+                config.conversion_tax_funded_from_withdrawal
+            ),
         )
-
-        cash_need = max(
-            ZERO,
-            planned_spending
-            + (
-                conversion_tax
-                if config.conversion_tax_funded_from_withdrawal
-                else ZERO
-            )
-            - total_non_portfolio_income,
-        )
-
-        # --------------------------------------------------
-        # Allocate spending withdrawals.
-        #
-        # Roth conversions reserve their source-account dollars
-        # before this allocation occurs.
-        # --------------------------------------------------
 
         (
             withdrawals,
@@ -826,20 +888,6 @@ def run_retirement_engine(
             market_decline=market_decline,
             reserved_for_conversions=roth_conversions,
         )
-
-        # --------------------------------------------------
-        # The portfolio is allowed to be underfunded.
-        #
-        # A shortfall is represented by:
-        #
-        #     net_cash_from_withdrawal < cash_need
-        #
-        # The engine continues into the next year with the
-        # resulting account balances.
-        #
-        # This is intentional for long-horizon projection and
-        # depletion testing.
-        # --------------------------------------------------
 
         projection = project_portfolio_year(
             year=year,
@@ -863,6 +911,8 @@ def run_retirement_engine(
                 transaction_income=transaction_income,
                 rental_income=rental_income,
                 social_security=social_security,
+                outside_income=outside_income,
+                net_spending_need=net_spending_need,
                 conversion_amount=actual_conversion_amount,
                 conversion_tax=conversion_tax,
                 cash_need_before_withdrawal=cash_need,
@@ -878,10 +928,6 @@ def run_retirement_engine(
             )
         )
 
-        # --------------------------------------------------
-        # Carry state into the next year.
-        # --------------------------------------------------
-
         account_balances = ending_balances
 
     return results
@@ -891,19 +937,20 @@ def print_retirement_engine(
     results: list[RetirementYearResult],
 ):
     """
-    Print the annual 2027-2040 retirement-engine ledger.
+    Print the annual CROS retirement-engine ledger.
     """
 
     print()
     print(
         "CROS RETIREMENT ENGINE"
     )
-    print("=" * 145)
+    print("=" * 160)
 
     print(
         f"{'Year':<8}"
         f"{'Spending':>15}"
-        f"{'Income':>15}"
+        f"{'Outside Income':>17}"
+        f"{'Cash Need':>15}"
         f"{'Withdrawal':>15}"
         f"{'Withdrawal Tax':>16}"
         f"{'Roth Conv.':>15}"
@@ -911,20 +958,15 @@ def print_retirement_engine(
         f"{'Ending Portfolio':>20}"
     )
 
-    print("-" * 145)
+    print("-" * 160)
 
     for result in results:
-
-        total_income = (
-            result.transaction_income
-            + result.rental_income
-            + result.social_security
-        )
 
         print(
             f"{result.year:<8}"
             f"${result.planned_spending:>13,.2f}"
-            f"${total_income:>13,.2f}"
+            f"${result.outside_income:>15,.2f}"
+            f"${result.cash_need_before_withdrawal:>13,.2f}"
             f"${result.gross_withdrawal:>13,.2f}"
             f"${result.withdrawal_tax:>14,.2f}"
             f"${result.conversion_amount:>13,.2f}"
@@ -944,6 +986,11 @@ def print_retirement_engine(
                 f"         Withdrawal sources: "
                 f"{sources}"
             )
+
+        print(
+            f"         Net cash from withdrawal: "
+            f"${result.net_cash_from_withdrawal:,.2f}"
+        )
 
         shortfall = (
             result.cash_need_before_withdrawal
