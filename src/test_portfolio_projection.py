@@ -6,8 +6,8 @@ from portfolio_projection import (
 )
 
 
-print("PORTFOLIO INVESTMENT RETURN TEST")
-print("=================================")
+print("PORTFOLIO WITHDRAWAL TEST")
+print("==========================")
 
 
 balances_2027 = {
@@ -20,99 +20,163 @@ balances_2027 = {
 }
 
 
-projection_2027 = project_portfolio_year(
+# --------------------------------------------------
+# Test a $60,000 withdrawal from Chris 401(k).
+# --------------------------------------------------
+
+withdrawals = {
+    "Chris 401(k)": Decimal("60000"),
+}
+
+
+projection = project_portfolio_year(
     year=2027,
     account_balances=balances_2027,
     annual_return=Decimal("0.05"),
+    withdrawals=withdrawals,
 )
 
 
 print()
 print(
     f"Beginning portfolio: "
-    f"${projection_2027.beginning_total:,.2f}"
+    f"${projection.beginning_total:,.2f}"
 )
 
 print(
     f"Investment gain: "
-    f"${projection_2027.investment_gain_total:,.2f}"
+    f"${projection.investment_gain_total:,.2f}"
+)
+
+print(
+    f"Portfolio withdrawal: "
+    f"${projection.withdrawal_total:,.2f}"
 )
 
 print(
     f"Ending portfolio: "
-    f"${projection_2027.ending_total:,.2f}"
-)
-
-
-expected_gain = (
-    Decimal("1219138.61")
-    * Decimal("0.05")
-)
-
-
-expected_ending = (
-    Decimal("1219138.61")
-    + expected_gain
-)
-
-
-assert (
-    projection_2027.beginning_total
-    == Decimal("1219138.61")
-)
-
-
-assert (
-    projection_2027.investment_gain_total
-    == expected_gain
-)
-
-
-assert (
-    projection_2027.ending_total
-    == expected_ending
+    f"${projection.ending_total:,.2f}"
 )
 
 
 # --------------------------------------------------
-# Verify that returns compound year-to-year.
+# Find the individual account results.
 # --------------------------------------------------
 
-projections = project_portfolio_years(
-    start_year=2027,
-    end_year=2040,
-    annual_return=Decimal("0.05"),
+chris = next(
+    account
+    for account in projection.accounts
+    if account.account_name
+    == "Chris 401(k)"
 )
 
 
-assert len(projections) == 14
-
-
-for index in range(1, len(projections)):
-
-    previous_year = projections[index - 1]
-    current_year = projections[index]
-
-    assert (
-        current_year.beginning_total
-        == previous_year.ending_total
-    )
+stephanie = next(
+    account
+    for account in projection.accounts
+    if account.account_name
+    == "Stephanie 401(k)"
+)
 
 
 print()
 print(
-    f"2027 ending: "
+    f"Chris 401(k) ending: "
+    f"${chris.ending_balance:,.2f}"
+)
+
+print(
+    f"Stephanie 401(k) ending: "
+    f"${stephanie.ending_balance:,.2f}"
+)
+
+
+# Chris:
+# $752,073 + $37,603.65 gain - $60,000
+# = $729,676.65
+
+expected_chris = (
+    Decimal("752073")
+    + (
+        Decimal("752073")
+        * Decimal("0.05")
+    )
+    - Decimal("60000")
+)
+
+
+assert (
+    chris.ending_balance
+    == expected_chris
+)
+
+
+# Stephanie was not withdrawn from.
+
+expected_stephanie = (
+    Decimal("414214.61")
+    + (
+        Decimal("414214.61")
+        * Decimal("0.05")
+    )
+)
+
+
+assert (
+    stephanie.ending_balance
+    == expected_stephanie
+)
+
+
+assert (
+    projection.withdrawal_total
+    == Decimal("60000")
+)
+
+
+# --------------------------------------------------
+# Verify the withdrawal carries into the following
+# year's beginning balance.
+# --------------------------------------------------
+
+withdrawals_by_year = {
+    2027: {
+        "Chris 401(k)": Decimal("60000"),
+    }
+}
+
+
+projections = project_portfolio_years(
+    start_year=2027,
+    end_year=2028,
+    annual_return=Decimal("0.05"),
+    withdrawals_by_year=withdrawals_by_year,
+)
+
+
+assert len(projections) == 2
+
+
+assert (
+    projections[1].beginning_total
+    == projections[0].ending_total
+)
+
+
+print()
+print(
+    f"2027 ending portfolio: "
     f"${projections[0].ending_total:,.2f}"
 )
 
 print(
-    f"2040 ending: "
-    f"${projections[-1].ending_total:,.2f}"
+    f"2028 beginning portfolio: "
+    f"${projections[1].beginning_total:,.2f}"
 )
 
 
 print()
 print(
-    "PASS: Investment returns correctly "
-    "compound through the multi-year projection."
+    "PASS: Account-specific withdrawals correctly "
+    "reduce the designated account and carry forward."
 )

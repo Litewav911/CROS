@@ -29,19 +29,25 @@ def project_portfolio_year(
     year: int,
     account_balances: dict[str, Decimal],
     annual_return: Decimal = Decimal("0"),
+    withdrawals: dict[str, Decimal] | None = None,
 ) -> PortfolioProjection:
     """
     Project all modeled retirement accounts for one year.
 
-    annual_return is expressed as a decimal.
+    withdrawals maps account names to withdrawal amounts.
 
     Example:
-        Decimal("0.05") = 5%
-        Decimal("0.06") = 6%
 
-    The return is applied to each account's beginning
-    balance for this initial projection engine.
+        {
+            "Chris 401(k)": Decimal("60000")
+        }
+
+    The withdrawal is applied only to the specified
+    account.
     """
+
+    if withdrawals is None:
+        withdrawals = {}
 
     account_projections = []
 
@@ -62,6 +68,28 @@ def project_portfolio_year(
             )
         )
 
+        withdrawal = Decimal(
+            str(
+                withdrawals.get(
+                    account.name,
+                    Decimal("0"),
+                )
+            )
+        )
+
+        if withdrawal < 0:
+            raise ValueError(
+                "Withdrawal cannot be negative."
+            )
+
+        if withdrawal > beginning_balance:
+            raise ValueError(
+                f"Withdrawal of ${withdrawal:,.2f} "
+                f"exceeds the beginning balance of "
+                f"${beginning_balance:,.2f} for "
+                f"{account.name}."
+            )
+
         investment_gain = (
             beginning_balance
             * annual_return
@@ -72,7 +100,7 @@ def project_portfolio_year(
             account_name=account.name,
             beginning_balance=beginning_balance,
             investment_gain=investment_gain,
-            withdrawal=Decimal("0"),
+            withdrawal=withdrawal,
             roth_conversion=Decimal("0"),
         )
 
@@ -129,13 +157,28 @@ def project_portfolio_years(
     start_year: int,
     end_year: int,
     annual_return: Decimal = Decimal("0"),
+    withdrawals_by_year=None,
 ):
     """
     Project the portfolio across multiple years.
 
     Each year's ending account balances become the
     following year's beginning balances.
+
+    withdrawals_by_year should have this structure:
+
+        {
+            2027: {
+                "Chris 401(k)": Decimal("60000")
+            },
+            2028: {
+                "Chris 401(k)": Decimal("65000")
+            }
+        }
     """
+
+    if withdrawals_by_year is None:
+        withdrawals_by_year = {}
 
     account_balances = (
         create_initial_account_balances()
@@ -148,10 +191,16 @@ def project_portfolio_years(
         end_year + 1,
     ):
 
+        withdrawals = withdrawals_by_year.get(
+            year,
+            {},
+        )
+
         projection = project_portfolio_year(
             year=year,
             account_balances=account_balances,
             annual_return=annual_return,
+            withdrawals=withdrawals,
         )
 
         projections.append(
@@ -177,16 +226,17 @@ def print_portfolio_projection(
         f"{projection.year}"
     )
 
-    print("=" * 80)
+    print("=" * 85)
 
     print(
         f"{'Account':30}"
         f"{'Beginning':>18}"
         f"{'Gain':>18}"
+        f"{'Withdrawal':>18}"
         f"{'Ending':>18}"
     )
 
-    print("-" * 85)
+    print("-" * 105)
 
     for account in projection.accounts:
 
@@ -194,25 +244,34 @@ def print_portfolio_projection(
             f"{account.account_name:30}"
             f"${account.beginning_balance:>16,.2f}"
             f"${account.investment_gain:>16,.2f}"
+            f"${account.withdrawal:>16,.2f}"
             f"${account.ending_balance:>16,.2f}"
         )
 
-    print("-" * 85)
+    print("-" * 105)
 
     print(
         f"{'TOTAL PORTFOLIO':30}"
         f"${projection.beginning_total:>16,.2f}"
         f"${projection.investment_gain_total:>16,.2f}"
+        f"${projection.withdrawal_total:>16,.2f}"
         f"${projection.ending_total:>16,.2f}"
     )
 
 
 if __name__ == "__main__":
 
+    withdrawals = {
+        2027: {
+            "Chris 401(k)": Decimal("60000"),
+        }
+    }
+
     projections = project_portfolio_years(
         start_year=2027,
         end_year=2040,
         annual_return=Decimal("0.05"),
+        withdrawals_by_year=withdrawals,
     )
 
     for projection in projections:
@@ -220,8 +279,8 @@ if __name__ == "__main__":
         print(
             f"{projection.year}: "
             f"${projection.beginning_total:,.2f}"
-            f" + "
-            f"${projection.investment_gain_total:,.2f}"
+            f" - withdrawal "
+            f"${projection.withdrawal_total:,.2f}"
             f" = "
             f"${projection.ending_total:,.2f}"
         )
