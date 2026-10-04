@@ -1,13 +1,80 @@
 from decimal import Decimal
 
 from portfolio_projection import (
+    create_initial_account_balances,
+    project_portfolio_year,
     project_portfolio_years,
 )
 
 
-print("PORTFOLIO ANNUAL WITHDRAWAL INTEGRATION TEST")
-print("=============================================")
+print("PORTFOLIO PROJECTION TEST")
+print("==========================")
 
+
+# --------------------------------------------------
+# Initial portfolio
+# --------------------------------------------------
+
+balances = create_initial_account_balances()
+
+beginning_total = sum(
+    balances.values(),
+    Decimal("0"),
+)
+
+print()
+print(
+    f"Beginning portfolio: "
+    f"${beginning_total:,.2f}"
+)
+
+
+# --------------------------------------------------
+# Test 1: Investment return
+# --------------------------------------------------
+
+result = project_portfolio_year(
+    year=2027,
+    account_balances=balances,
+    annual_return=Decimal("0.05"),
+    withdrawals={},
+    roth_conversions={},
+)
+
+expected_gain = (
+    beginning_total
+    * Decimal("0.05")
+)
+
+expected_ending = (
+    beginning_total
+    + expected_gain
+)
+
+print(
+    f"Investment gain: "
+    f"${result.investment_gain_total:,.2f}"
+)
+
+print(
+    f"Ending portfolio: "
+    f"${result.ending_total:,.2f}"
+)
+
+assert (
+    result.investment_gain_total
+    == expected_gain
+)
+
+assert (
+    result.ending_total
+    == expected_ending
+)
+
+
+# --------------------------------------------------
+# Test 2: Multi-year compounding
+# --------------------------------------------------
 
 projections = project_portfolio_years(
     start_year=2027,
@@ -15,94 +82,148 @@ projections = project_portfolio_years(
     annual_return=Decimal("0.05"),
 )
 
-
-print()
-
-for projection in projections:
-
-    print(
-        f"{projection.year}: "
-        f"Beginning "
-        f"${projection.beginning_total:,.2f}"
-        f" | Gain "
-        f"${projection.investment_gain_total:,.2f}"
-        f" | Withdrawal "
-        f"${projection.withdrawal_total:,.2f}"
-        f" | Ending "
-        f"${projection.ending_total:,.2f}"
-    )
-
-
-# --------------------------------------------------
-# Verify the complete 2027-2040 timeline.
-# --------------------------------------------------
-
 assert len(projections) == 14
-
-
-# --------------------------------------------------
-# Verify that each year begins with the prior year's
-# ending portfolio.
-# --------------------------------------------------
-
-for index in range(1, len(projections)):
-
-    previous_year = projections[index - 1]
-    current_year = projections[index]
-
-    assert (
-        current_year.beginning_total
-        == previous_year.ending_total
-    )
-
-
-# --------------------------------------------------
-# Current test data produces no portfolio withdrawal.
-# The portfolio should therefore simply compound
-# at the 5% test return.
-# --------------------------------------------------
-
-assert (
-    projections[0].withdrawal_total
-    == Decimal("0")
-)
-
-
-assert (
-    projections[-1].withdrawal_total
-    == Decimal("0")
-)
-
-
-# --------------------------------------------------
-# Verify the first year's return.
-# --------------------------------------------------
-
-expected_2027_gain = (
-    Decimal("1219138.61")
-    * Decimal("0.05")
-)
-
-
-assert (
-    projections[0].investment_gain_total
-    == expected_2027_gain
-)
-
 
 print()
 print(
-    f"2027 ending portfolio: "
+    f"2027 ending: "
     f"${projections[0].ending_total:,.2f}"
 )
 
 print(
-    f"2040 ending portfolio: "
+    f"2040 ending: "
     f"${projections[-1].ending_total:,.2f}"
 )
 
+
+# --------------------------------------------------
+# Verify year-to-year carry forward
+# --------------------------------------------------
+
+for index in range(1, len(projections)):
+
+    previous = projections[index - 1]
+    current = projections[index]
+
+    assert (
+        current.beginning_total
+        == previous.ending_total
+    )
+
+
+# --------------------------------------------------
+# Test 3: Account-specific withdrawal
+# --------------------------------------------------
+
+withdrawal_amount = Decimal("60000")
+
+withdrawal_result = project_portfolio_year(
+    year=2027,
+    account_balances=balances,
+    annual_return=Decimal("0.05"),
+    withdrawals={
+        "Chris 401(k)": withdrawal_amount
+    },
+    roth_conversions={},
+)
+
+print()
+print("ACCOUNT WITHDRAWAL TEST")
+print("-----------------------")
+
+print(
+    f"Withdrawal: "
+    f"${withdrawal_result.withdrawal_total:,.2f}"
+)
+
+print(
+    f"Ending portfolio: "
+    f"${withdrawal_result.ending_total:,.2f}"
+)
+
+assert (
+    withdrawal_result.withdrawal_total
+    == withdrawal_amount
+)
+
+chris_account = next(
+    account
+    for account in withdrawal_result.accounts
+    if account.account_name
+    == "Chris 401(k)"
+)
+
+assert (
+    chris_account.withdrawal
+    == withdrawal_amount
+)
+
+
+# --------------------------------------------------
+# Test 4: Roth conversion
+# --------------------------------------------------
+
+conversion_amount = Decimal("80000")
+
+conversion_result = project_portfolio_year(
+    year=2027,
+    account_balances=balances,
+    annual_return=Decimal("0"),
+    withdrawals={},
+    roth_conversions={
+        "Chris 401(k)": conversion_amount
+    },
+)
+
+print()
+print("ROTH CONVERSION TEST")
+print("--------------------")
+
+print(
+    f"Roth conversion: "
+    f"${conversion_result.roth_conversion_total:,.2f}"
+)
+
+print(
+    f"Ending portfolio: "
+    f"${conversion_result.ending_total:,.2f}"
+)
+
+assert (
+    conversion_result.roth_conversion_total
+    == conversion_amount
+)
+
+chris_conversion_account = next(
+    account
+    for account in conversion_result.accounts
+    if account.account_name
+    == "Chris 401(k)"
+)
+
+assert (
+    chris_conversion_account.roth_conversion
+    == conversion_amount
+)
+
+
+# --------------------------------------------------
+# A Roth conversion is not a spending withdrawal.
+# --------------------------------------------------
+
+assert (
+    conversion_result.withdrawal_total
+    == Decimal("0")
+)
+
+
+# --------------------------------------------------
+# Final result
+# --------------------------------------------------
+
 print()
 print(
-    "PASS: 2027-2040 portfolio projection "
-    "is now driven by the annual withdrawal engine."
+    "PASS: Portfolio projection correctly handles "
+    "investment returns, year-to-year balances, "
+    "account-specific withdrawals, and Roth conversions."
 )
