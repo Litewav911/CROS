@@ -35,15 +35,14 @@ def project_portfolio_year(
     account_balances: dict[str, Decimal],
     annual_return: Decimal = Decimal("0"),
     withdrawals: dict[str, Decimal] | None = None,
+    roth_conversions: dict[str, Decimal] | None = None,
 ) -> PortfolioProjection:
-    """
-    Project all modeled retirement accounts for one year.
-
-    withdrawals maps account names to withdrawal amounts.
-    """
 
     if withdrawals is None:
         withdrawals = {}
+
+    if roth_conversions is None:
+        roth_conversions = {}
 
     account_projections = []
 
@@ -73,16 +72,33 @@ def project_portfolio_year(
             )
         )
 
+        roth_conversion = Decimal(
+            str(
+                roth_conversions.get(
+                    account.name,
+                    Decimal("0"),
+                )
+            )
+        )
+
         if withdrawal < 0:
             raise ValueError(
                 "Withdrawal cannot be negative."
             )
 
-        if withdrawal > beginning_balance:
+        if roth_conversion < 0:
             raise ValueError(
-                f"Withdrawal of ${withdrawal:,.2f} "
-                f"exceeds the beginning balance of "
-                f"${beginning_balance:,.2f} for "
+                "Roth conversion cannot be negative."
+            )
+
+        if (
+            withdrawal
+            + roth_conversion
+            > beginning_balance
+        ):
+            raise ValueError(
+                f"Withdrawal plus Roth conversion "
+                f"exceeds the beginning balance for "
                 f"{account.name}."
             )
 
@@ -97,7 +113,7 @@ def project_portfolio_year(
             beginning_balance=beginning_balance,
             investment_gain=investment_gain,
             withdrawal=withdrawal,
-            roth_conversion=Decimal("0"),
+            roth_conversion=roth_conversion,
         )
 
         account_projections.append(
@@ -136,10 +152,6 @@ def project_portfolio_year(
 
 
 def create_initial_account_balances():
-    """
-    Create the initial beginning balances from the
-    retirement account model.
-    """
 
     return {
         account.name: Decimal(
@@ -154,24 +166,15 @@ def project_portfolio_years(
     end_year: int,
     annual_return: Decimal = Decimal("0"),
     withdrawals_by_year=None,
+    roth_conversions_by_year=None,
     market_declines_by_year=None,
 ):
-    """
-    Project the portfolio across multiple years.
-
-    If withdrawals_by_year is supplied, those explicit
-    withdrawals are used.
-
-    Otherwise the annual withdrawal engine determines
-    the withdrawal for each year.
-
-    market_declines_by_year allows the existing
-    withdrawal strategy to select the cash reserve
-    during specified market-decline years.
-    """
 
     if withdrawals_by_year is None:
         withdrawals_by_year = {}
+
+    if roth_conversions_by_year is None:
+        roth_conversions_by_year = {}
 
     if market_declines_by_year is None:
         market_declines_by_year = {}
@@ -232,11 +235,19 @@ def project_portfolio_years(
                     source: amount
                 }
 
+        roth_conversions = (
+            roth_conversions_by_year.get(
+                year,
+                {},
+            )
+        )
+
         projection = project_portfolio_year(
             year=year,
             account_balances=account_balances,
             annual_return=annual_return,
             withdrawals=withdrawals,
+            roth_conversions=roth_conversions,
         )
 
         projections.append(
@@ -262,17 +273,18 @@ def print_portfolio_projection(
         f"{projection.year}"
     )
 
-    print("=" * 105)
+    print("=" * 120)
 
     print(
         f"{'Account':30}"
         f"{'Beginning':>18}"
         f"{'Gain':>18}"
         f"{'Withdrawal':>18}"
+        f"{'Roth Conv.':>18}"
         f"{'Ending':>18}"
     )
 
-    print("-" * 105)
+    print("-" * 120)
 
     for account in projection.accounts:
 
@@ -281,16 +293,18 @@ def print_portfolio_projection(
             f"${account.beginning_balance:>16,.2f}"
             f"${account.investment_gain:>16,.2f}"
             f"${account.withdrawal:>16,.2f}"
+            f"${account.roth_conversion:>16,.2f}"
             f"${account.ending_balance:>16,.2f}"
         )
 
-    print("-" * 105)
+    print("-" * 120)
 
     print(
         f"{'TOTAL PORTFOLIO':30}"
         f"${projection.beginning_total:>16,.2f}"
         f"${projection.investment_gain_total:>16,.2f}"
         f"${projection.withdrawal_total:>16,.2f}"
+        f"${projection.roth_conversion_total:>16,.2f}"
         f"${projection.ending_total:>16,.2f}"
     )
 
@@ -310,6 +324,8 @@ if __name__ == "__main__":
             f"${projection.beginning_total:,.2f}"
             f" - withdrawal "
             f"${projection.withdrawal_total:,.2f}"
+            f" - Roth conversion "
+            f"${projection.roth_conversion_total:,.2f}"
             f" = "
             f"${projection.ending_total:,.2f}"
         )
