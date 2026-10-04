@@ -78,13 +78,12 @@ class RetirementYearResult:
     """
     Complete state transition for one retirement year.
 
-    Outside income is reported separately from the portfolio
-    withdrawal requirement.
-
-    Outside income does not reduce the planned retirement
-    spending withdrawal requirement.
+    Outside income reduces the amount of retirement spending
+    that must be funded by the investment portfolio.
 
     Roth conversions remain portfolio-neutral transfers.
+    Conversion tax is treated separately as a cash requirement
+    when conversion_tax_funded_from_withdrawal is enabled.
     """
 
     year: int
@@ -699,24 +698,51 @@ def _validate_account_balances(
 
 def _portfolio_cash_requirement(
     planned_spending: Decimal,
+    outside_income: Decimal,
     conversion_tax: Decimal,
     conversion_tax_funded_from_withdrawal: bool,
 ) -> Decimal:
     """
     Determine the portfolio withdrawal requirement.
 
-    IMPORTANT:
-
-    Planned spending is the amount the retirement portfolio
-    is expected to fund.
+    Planned spending is the household spending target.
 
     Outside income such as rental income, transaction income,
-    and Social Security is tracked separately and does NOT
-    reduce the planned portfolio withdrawal requirement.
+    and Social Security is available to fund that spending
+    and therefore reduces the amount required from the
+    investment portfolio.
 
-    Roth-conversion tax is added when the configuration says
-    that the tax is funded from the portfolio.
+    Roth-conversion tax is added separately when the
+    configuration says that the tax is funded from the
+    portfolio.
+
+    Formula:
+
+        portfolio cash need =
+            planned spending
+            - outside income
+            + conversion tax
+
+    The result cannot be less than zero.
     """
+
+    planned_spending = _to_decimal(
+        planned_spending
+    )
+
+    outside_income = _to_decimal(
+        outside_income
+    )
+
+    conversion_tax = _to_decimal(
+        conversion_tax
+    )
+
+    spending_need = max(
+        ZERO,
+        planned_spending
+        - outside_income,
+    )
 
     tax_need = (
         conversion_tax
@@ -726,7 +752,7 @@ def _portfolio_cash_requirement(
 
     return max(
         ZERO,
-        planned_spending
+        spending_need
         + tax_need,
     )
 
@@ -740,8 +766,11 @@ def run_retirement_engine(
     Each year's ending balances become the following year's
     beginning balances.
 
-    Outside income is reported but does not reduce the
-    retirement spending withdrawal requirement.
+    Outside income reduces the portfolio-funded spending
+    requirement.
+
+    Roth conversion tax is added to the portfolio cash need
+    only when conversion_tax_funded_from_withdrawal is enabled.
     """
 
     if config.start_year > config.end_year:
@@ -812,19 +841,30 @@ def run_retirement_engine(
         )
 
         # --------------------------------------------------
-        # IMPORTANT CROS PLAN RULE
+        # CROS CASH-FLOW RULE
         #
-        # Outside income is informational.
+        # The retirement spending target represents total
+        # household spending, not an amount that must be
+        # supplied entirely by the portfolio.
         #
-        # Rental income, transaction income, and Social
-        # Security do NOT reduce the portfolio-funded
-        # spending target.
+        # Outside income available during the year therefore
+        # reduces the amount that the portfolio must supply.
         #
-        # The $11,000/month retirement spending target is
-        # therefore modeled independently of outside income.
+        # Example:
+        #
+        #   Spending:       $132,000
+        #   Outside income:  $30,000
+        #   Portfolio need: $102,000
+        #
+        # Roth-conversion tax is added afterward when that tax
+        # is funded from the portfolio.
         # --------------------------------------------------
 
-        net_spending_need = planned_spending
+        net_spending_need = max(
+            ZERO,
+            planned_spending
+            - outside_income,
+        )
 
         base_taxable_income = (
             _base_taxable_income(
@@ -867,7 +907,8 @@ def run_retirement_engine(
         )
 
         cash_need = _portfolio_cash_requirement(
-            planned_spending=net_spending_need,
+            planned_spending=planned_spending,
+            outside_income=outside_income,
             conversion_tax=conversion_tax,
             conversion_tax_funded_from_withdrawal=(
                 config.conversion_tax_funded_from_withdrawal

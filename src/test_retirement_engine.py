@@ -39,6 +39,9 @@ def test_engine_uses_chris_401k_under_normal_conditions():
         end_year=2027,
         annual_return=Decimal("0"),
         monthly_spending_target=Decimal("1000"),
+        rental_income_by_year={
+            2027: Decimal("0"),
+        },
     )
 
     results = run_retirement_engine(
@@ -77,6 +80,9 @@ def test_engine_uses_cash_reserve_during_market_decline():
         annual_return=Decimal("0"),
         monthly_spending_target=Decimal("1000"),
         initial_balances=initial_balances,
+        rental_income_by_year={
+            2027: Decimal("0"),
+        },
         market_declines_by_year={
             2027: True,
         },
@@ -98,6 +104,188 @@ def test_engine_uses_cash_reserve_during_market_decline():
             "Cash Reserve"
         ]
         > Decimal("0")
+    )
+
+
+def test_outside_income_reduces_portfolio_need():
+
+    config = RetirementEngineConfig(
+        start_year=2027,
+        end_year=2027,
+        annual_return=Decimal("0"),
+        monthly_spending_target=Decimal("10000"),
+        transaction_income_by_year={
+            2027: Decimal("20000"),
+        },
+        rental_income_by_year={
+            2027: Decimal("10000"),
+        },
+        social_security_by_year={
+            2027: Decimal("10000"),
+        },
+    )
+
+    results = run_retirement_engine(
+        config
+    )
+
+    result = results[0]
+
+    assert (
+        result.outside_income
+        == Decimal("40000")
+    )
+
+    assert (
+        result.net_spending_need
+        == Decimal("52383.56164383561643835616438")
+    )
+
+    assert (
+        result.cash_need_before_withdrawal
+        == Decimal("52383.56164383561643835616438")
+    )
+
+    assert (
+        result.net_cash_from_withdrawal
+        == Decimal("52383.56164383561643835616439")
+    )
+
+
+def test_outside_income_can_fully_cover_spending():
+
+    config = RetirementEngineConfig(
+        start_year=2027,
+        end_year=2027,
+        annual_return=Decimal("0"),
+        monthly_spending_target=Decimal("1000"),
+        rental_income_by_year={
+            2027: Decimal("20000"),
+        },
+    )
+
+    results = run_retirement_engine(
+        config
+    )
+
+    result = results[0]
+
+    assert (
+        result.planned_spending
+        == Decimal("9238.356164383561643835616438")
+    )
+
+    assert (
+        result.outside_income
+        == Decimal("20000")
+    )
+
+    assert (
+        result.net_spending_need
+        == Decimal("0")
+    )
+
+    assert (
+        result.cash_need_before_withdrawal
+        == Decimal("0")
+    )
+
+    assert (
+        result.gross_withdrawal
+        == Decimal("0")
+    )
+
+    assert (
+        result.withdrawal_allocations
+        == {}
+    )
+
+
+def test_social_security_reduces_portfolio_need():
+
+    config = RetirementEngineConfig(
+        start_year=2027,
+        end_year=2027,
+        annual_return=Decimal("0"),
+        monthly_spending_target=Decimal("10000"),
+        rental_income_by_year={
+            2027: Decimal("0"),
+        },
+        social_security_by_year={
+            2027: Decimal("30000"),
+        },
+    )
+
+    results = run_retirement_engine(
+        config
+    )
+
+    result = results[0]
+
+    assert (
+        result.outside_income
+        == Decimal("30000")
+    )
+
+    assert (
+        result.net_spending_need
+        == Decimal("62383.56164383561643835616438")
+    )
+
+    assert (
+        result.cash_need_before_withdrawal
+        == result.net_spending_need
+    )
+
+
+def test_roth_conversion_tax_is_added_after_outside_income():
+
+    config = RetirementEngineConfig(
+        start_year=2027,
+        end_year=2027,
+        annual_return=Decimal("0"),
+        monthly_spending_target=Decimal("10000"),
+        rental_income_by_year={
+            2027: Decimal("30000"),
+        },
+        base_taxable_income_by_year={
+            2027: Decimal("0"),
+        },
+        roth_conversions_by_year={
+            2027: {
+                "Chris 401(k)": Decimal("80000"),
+            }
+        },
+        conversion_tax_funded_from_withdrawal=True,
+    )
+
+    results = run_retirement_engine(
+        config
+    )
+
+    result = results[0]
+
+    assert (
+        result.net_spending_need
+        == Decimal("62383.56164383561643835616438")
+    )
+
+    assert (
+        result.conversion_amount
+        == Decimal("80000")
+    )
+
+    assert (
+        result.conversion_tax
+        == Decimal("12296.0000")
+    )
+
+    assert (
+        result.cash_need_before_withdrawal
+        == (
+            result.net_spending_need
+            + result.conversion_tax
+        )
     )
 
 
