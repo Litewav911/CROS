@@ -1,185 +1,149 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
-from multi_year_retirement_roth import (
-    calculate_multi_year_retirement_roth,
+from real_retirement_scenario import (
+    CASH_RESERVE,
+    run_real_retirement_scenario,
 )
 
 
-print("REAL RETIREMENT SCENARIO TEST")
-print("============================")
+CENT = Decimal("0.01")
 
 
-START_YEAR = 2027
-END_YEAR = 2040
+def money(value: Decimal) -> Decimal:
+    """
+    Round a modeled monetary value to the nearest cent.
+    """
 
-ANNUAL_RETURN = Decimal("0.05")
-
-
-# --------------------------------------------------
-# Real-plan Roth conversion targets
-#
-# These are still explicit targets at this stage.
-# Later 70H steps will make the conversion amount
-# dynamic based on tax brackets and available
-# traditional funds.
-# --------------------------------------------------
-
-ROTH_CONVERSION_TARGET = Decimal("80000")
-
-
-roth_conversions = {
-    year: {
-        "Chris 401(k)": ROTH_CONVERSION_TARGET
-    }
-    for year in range(
-        START_YEAR,
-        END_YEAR + 1,
-    )
-}
-
-
-# --------------------------------------------------
-# Taxable-income assumption
-#
-# This is deliberately isolated here so that the
-# production tax-income engine can replace it later.
-# --------------------------------------------------
-
-base_taxable_income = {
-    year: Decimal("100000")
-    for year in range(
-        START_YEAR,
-        END_YEAR + 1,
-    )
-}
-
-
-# --------------------------------------------------
-# Run integrated retirement model
-# --------------------------------------------------
-
-results = calculate_multi_year_retirement_roth(
-    start_year=START_YEAR,
-    end_year=END_YEAR,
-    annual_return=ANNUAL_RETURN,
-    base_taxable_income_by_year=(
-        base_taxable_income
-    ),
-    roth_conversions_by_year=(
-        roth_conversions
-    ),
-)
-
-
-# --------------------------------------------------
-# Basic validation
-# --------------------------------------------------
-
-assert len(results) == 14
-
-assert results[0]["year"] == 2027
-
-assert results[-1]["year"] == 2040
-
-
-# --------------------------------------------------
-# Print scenario
-# --------------------------------------------------
-
-print()
-
-for result in results:
-
-    year = result["year"]
-
-    projection = result["projection"]
-
-    conversion = result["roth_conversion"]
-
-    balances = result["ending_balances"]
-
-    print(
-        f"{year}: "
-        f"Portfolio "
-        f"${projection.ending_total:,.2f}"
-    )
-
-    print(
-        f"    Chris 401(k): "
-        f"${balances['Chris 401(k)']:,.2f}"
-    )
-
-    print(
-        f"    Roth IRA: "
-        f"${balances['Roth IRA']:,.2f}"
-    )
-
-    print(
-        f"    Conversion: "
-        f"${conversion.conversion_amount:,.2f}"
-    )
-
-    print(
-        f"    Federal tax: "
-        f"${conversion.federal_tax:,.2f}"
-    )
-
-    print(
-        f"    NC tax: "
-        f"${conversion.nc_tax:,.2f}"
+    return value.quantize(
+        CENT,
+        rounding=ROUND_HALF_UP,
     )
 
 
-# --------------------------------------------------
-# Final validation
-# --------------------------------------------------
+def test_real_retirement_scenario_produces_fourteen_years():
 
-final_balances = (
-    results[-1]["ending_balances"]
-)
+    results = run_real_retirement_scenario()
 
+    assert len(results) == 14
 
-assert (
-    final_balances["Chris 401(k)"]
-    >= Decimal("0")
-)
+    assert results[0].year == 2027
+    assert results[-1].year == 2040
 
 
-assert (
-    final_balances["Roth IRA"]
-    >= Decimal("0")
-)
+def test_real_retirement_scenario_uses_partial_first_year():
+
+    results = run_real_retirement_scenario()
+
+    result = results[0]
+
+    assert money(
+        result.planned_spending
+    ) == Decimal("101621.92")
 
 
-assert (
-    results[-1]["projection"].ending_total
-    >= Decimal("0")
-)
+def test_real_retirement_scenario_has_expected_outside_income():
+
+    results = run_real_retirement_scenario()
+
+    for result in results:
+
+        outside_income = (
+            result.transaction_income
+            + result.rental_income
+            + result.social_security
+        )
+
+        assert money(
+            outside_income
+        ) == Decimal("34636.09")
 
 
-print()
+def test_real_retirement_scenario_uses_starting_cash_reserve():
 
-print(
-    "PASS: Real retirement scenario runs "
-    "from 2027 through 2040."
-)
+    results = run_real_retirement_scenario()
 
-print(
-    "PASS: Account balances remain non-negative."
-)
+    first_result = results[0]
 
-print(
-    "PASS: Roth conversions integrate with "
-    "the retirement portfolio."
-)
+    assert (
+        first_result.beginning_balances[
+            "Cash Reserve"
+        ]
+        == CASH_RESERVE
+    )
 
-print(
-    "PASS: Federal and NC conversion taxes "
-    "integrate with the scenario."
-)
 
-print()
-print(
-    "PASS: 70H real retirement scenario "
-    "foundation is working correctly."
-)
+def test_real_retirement_scenario_uses_eighty_thousand_roth_conversion_target():
+
+    results = run_real_retirement_scenario()
+
+    for result in results:
+
+        if result.year in {
+            2027,
+            2028,
+            2029,
+            2030,
+        }:
+
+            assert (
+                result.conversion_amount
+                == Decimal("80000")
+            )
+
+
+def test_real_retirement_scenario_has_no_cash_shortfall():
+
+    results = run_real_retirement_scenario()
+
+    for result in results:
+
+        shortfall = max(
+            Decimal("0"),
+            result.cash_need_before_withdrawal
+            - result.net_cash_from_withdrawal,
+        )
+
+        assert money(shortfall) == Decimal("0.00")
+
+
+def test_real_retirement_scenario_ending_portfolio_matches_baseline():
+
+    results = run_real_retirement_scenario()
+
+    final_result = results[-1]
+
+    assert (
+        money(final_result.ending_total)
+        == Decimal("178851.88")
+    )
+
+
+def test_real_retirement_scenario_ends_with_expected_account_balances():
+
+    results = run_real_retirement_scenario()
+
+    final_balances = results[-1].ending_balances
+
+    assert money(
+        final_balances["Chris 401(k)"]
+    ) == Decimal("0.00")
+
+    assert money(
+        final_balances["Stephanie 401(k)"]
+    ) == Decimal("0.00")
+
+    assert money(
+        final_balances["Brokerage"]
+    ) == Decimal("0.00")
+
+    assert money(
+        final_balances["Roth IRA"]
+    ) == Decimal("136354.62")
+
+    assert money(
+        final_balances["HSA"]
+    ) == Decimal("42497.25")
+
+    assert money(
+        final_balances["Cash Reserve"]
+    ) == Decimal("0.00")
