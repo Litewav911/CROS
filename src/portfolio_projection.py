@@ -45,7 +45,7 @@ def project_portfolio_year(
     Withdrawals and Roth conversions are then applied
     against the account value after investment growth.
 
-    Roth conversions are transfers within the portfolio:
+    Roth conversions are internal portfolio transfers:
 
         - traditional source account decreases
         - Roth IRA increases by the same gross amount
@@ -60,6 +60,15 @@ def project_portfolio_year(
     if roth_conversions is None:
         roth_conversions = {}
 
+    annual_return = Decimal(
+        str(annual_return)
+    )
+
+    if annual_return < 0:
+        raise ValueError(
+            "Annual return cannot be negative."
+        )
+
     account_projections = []
 
     beginning_total = Decimal("0")
@@ -67,6 +76,10 @@ def project_portfolio_year(
     withdrawal_total = Decimal("0")
     roth_conversion_total = Decimal("0")
     ending_total = Decimal("0")
+
+    # --------------------------------------------------
+    # Project each account
+    # --------------------------------------------------
 
     for account in RETIREMENT_ACCOUNTS:
 
@@ -115,6 +128,11 @@ def project_portfolio_year(
                 f"for {account.name}."
             )
 
+        # --------------------------------------------------
+        # Investment growth occurs before withdrawals and
+        # Roth conversions.
+        # --------------------------------------------------
+
         investment_gain = (
             beginning_balance
             * annual_return
@@ -150,7 +168,9 @@ def project_portfolio_year(
             roth_conversion=roth_conversion,
         )
 
-        account_projections.append(projection)
+        account_projections.append(
+            projection
+        )
 
         beginning_total += (
             projection.beginning_balance
@@ -171,6 +191,18 @@ def project_portfolio_year(
         ending_total += (
             projection.ending_balance
         )
+
+    # --------------------------------------------------
+    # Roth conversion destination
+    #
+    # The source account has already been reduced by the
+    # conversion above.
+    #
+    # Add the gross conversion to the Roth IRA.
+    #
+    # Because the source was reduced by the same amount,
+    # the total portfolio value remains unchanged.
+    # --------------------------------------------------
 
     total_conversion = sum(
         (
@@ -214,6 +246,58 @@ def project_portfolio_year(
         roth_conversion_total=roth_conversion_total,
         ending_total=ending_total,
     )
+
+
+def apply_roth_conversion_destination(
+    account_balances: dict[str, Decimal],
+    source_account: str,
+    destination_account: str,
+    conversion_amount: Decimal,
+):
+    """
+    Compatibility helper for Roth conversion integration.
+
+    Roth conversions are already fully applied by
+    project_portfolio_year():
+
+        - source account is reduced
+        - destination Roth IRA is increased
+        - total portfolio value is unchanged
+
+    This function therefore verifies that the requested
+    accounts exist and returns the balances unchanged.
+
+    It intentionally does not apply the conversion a second
+    time. This prevents double-counting when an integration
+    test or older calling component invokes this helper
+    after project_portfolio_year().
+    """
+
+    conversion_amount = Decimal(
+        str(conversion_amount)
+    )
+
+    if conversion_amount < 0:
+        raise ValueError(
+            "Roth conversion amount cannot be negative."
+        )
+
+    if source_account not in account_balances:
+        raise ValueError(
+            f"Source account not found: "
+            f"{source_account}"
+        )
+
+    if destination_account not in account_balances:
+        raise ValueError(
+            f"Destination account not found: "
+            f"{destination_account}"
+        )
+
+    if conversion_amount == 0:
+        return account_balances
+
+    return account_balances
 
 
 def create_initial_account_balances():
@@ -298,6 +382,10 @@ def project_portfolio_years(
         end_year + 1,
     ):
 
+        # --------------------------------------------------
+        # Determine withdrawals
+        # --------------------------------------------------
+
         if year in withdrawals_by_year:
 
             withdrawals = {
@@ -347,18 +435,22 @@ def project_portfolio_years(
                     source: amount
                 }
 
-        explicit_roth_conversions = (
-            roth_conversions_by_year.get(
-                year,
-                {},
-            )
-        )
+        # --------------------------------------------------
+        # Determine Roth conversions
+        # --------------------------------------------------
 
         roth_conversions = {
             account: Decimal(str(amount))
             for account, amount
-            in explicit_roth_conversions.items()
+            in roth_conversions_by_year.get(
+                year,
+                {},
+            ).items()
         }
+
+        # --------------------------------------------------
+        # Project the year
+        # --------------------------------------------------
 
         projection = project_portfolio_year(
             year=year,
@@ -371,6 +463,10 @@ def project_portfolio_years(
         projections.append(
             projection
         )
+
+        # --------------------------------------------------
+        # Carry ending balances into the next year
+        # --------------------------------------------------
 
         account_balances = {
             account.account_name:

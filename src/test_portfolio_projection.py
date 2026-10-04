@@ -74,12 +74,29 @@ assert (
 
 # --------------------------------------------------
 # Test 2: Multi-year compounding
+#
+# This test is specifically testing investment
+# compounding. It intentionally uses zero withdrawals
+# and zero Roth conversions so that retirement
+# cash-flow rules do not affect the result.
 # --------------------------------------------------
+
+zero_withdrawals = {
+    year: {}
+    for year in range(2027, 2041)
+}
+
+zero_roth_conversions = {
+    year: {}
+    for year in range(2027, 2041)
+}
 
 projections = project_portfolio_years(
     start_year=2027,
     end_year=2040,
     annual_return=Decimal("0.05"),
+    withdrawals_by_year=zero_withdrawals,
+    roth_conversions_by_year=zero_roth_conversions,
 )
 
 assert len(projections) == 14

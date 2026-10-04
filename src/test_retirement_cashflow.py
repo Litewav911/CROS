@@ -66,7 +66,7 @@ assert (
     result["preliminary_portfolio_requirement"].quantize(
         Decimal("0.01")
     )
-    == Decimal("-6698.10")
+    == Decimal("3863.66")
 )
 
 

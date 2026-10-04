@@ -23,15 +23,18 @@ def calculate_multi_year_retirement_roth(
     Project the integrated retirement plan across
     multiple years.
 
-    Retirement cash flow is calculated for every year,
-    but portfolio withdrawals are only applied when
-    explicitly supplied through withdrawals_by_year.
+    Retirement cash flow is calculated for every year.
 
-    This keeps the retirement cash-flow requirement
-    separate from the portfolio withdrawal decision.
+    Portfolio withdrawals are only applied when explicitly
+    supplied through withdrawals_by_year.
 
     Roth conversions are applied independently of
     spending withdrawals.
+
+    An explicitly requested Roth conversion can never
+    exceed the amount actually available in the source
+    account after investment growth and any withdrawal
+    from that account.
 
     In the final modeled year, if no explicit Chris 401(k)
     conversion is supplied, the remaining Chris 401(k)
@@ -90,15 +93,6 @@ def calculate_multi_year_retirement_roth(
 
         # --------------------------------------------------
         # Portfolio withdrawals
-        #
-        # IMPORTANT:
-        # Do not automatically turn the calculated annual
-        # portfolio requirement into an account withdrawal.
-        #
-        # The cash-flow engine determines how much spending
-        # would require portfolio funding. The caller controls
-        # whether and from which account that withdrawal is
-        # actually modeled.
         # --------------------------------------------------
 
         if year in withdrawals_by_year:
@@ -164,6 +158,77 @@ def calculate_multi_year_retirement_roth(
             for account, amount
             in explicit_conversions.items()
         }
+
+        # --------------------------------------------------
+        # Determine the maximum amount available for each
+        # explicitly requested conversion.
+        #
+        # Investment growth is applied before withdrawals
+        # and conversions in portfolio_projection.py.
+        #
+        # A conversion cannot exceed:
+        #
+        # beginning balance
+        # + investment gain
+        # - account withdrawal
+        #
+        # This prevents a fixed conversion schedule from
+        # attempting to convert more than remains in the
+        # source account.
+        # --------------------------------------------------
+
+        for account_name in list(
+            roth_conversions.keys()
+        ):
+
+            requested_conversion = roth_conversions[
+                account_name
+            ]
+
+            if requested_conversion < 0:
+                raise ValueError(
+                    f"Roth conversion cannot be negative "
+                    f"for {account_name} in {year}."
+                )
+
+            beginning_balance = Decimal(
+                str(
+                    account_balances.get(
+                        account_name,
+                        Decimal("0"),
+                    )
+                )
+            )
+
+            account_gain = (
+                beginning_balance
+                * annual_return
+            )
+
+            account_withdrawal = Decimal(
+                str(
+                    withdrawals.get(
+                        account_name,
+                        Decimal("0"),
+                    )
+                )
+            )
+
+            available_for_conversion = (
+                beginning_balance
+                + account_gain
+                - account_withdrawal
+            )
+
+            if available_for_conversion < 0:
+                available_for_conversion = Decimal("0")
+
+            if requested_conversion > (
+                available_for_conversion
+            ):
+                roth_conversions[
+                    account_name
+                ] = available_for_conversion
 
         # --------------------------------------------------
         # Final-year dynamic conversion

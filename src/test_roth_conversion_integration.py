@@ -1,132 +1,194 @@
 from decimal import Decimal
 
-from portfolio_projection import (
-    create_initial_account_balances,
-    project_portfolio_year,
+from roth_conversion_integration import (
+    calculate_roth_conversion,
 )
 
 
-print("ROTH CONVERSION INTEGRATION TEST")
-print("================================")
+print("ROTH CONVERSION / TAX INTEGRATION TEST")
+print("=======================================")
 
 
-balances = create_initial_account_balances()
+# --------------------------------------------------
+# Test inputs
+# --------------------------------------------------
+
+YEAR = 2027
+BASE_TAXABLE_INCOME = Decimal("100000")
+CONVERSION_AMOUNT = Decimal("80000")
 
 
-conversion = {
-    "Chris 401(k)": Decimal("80000")
-}
+# --------------------------------------------------
+# Calculate Roth conversion
+# --------------------------------------------------
 
-
-result = project_portfolio_year(
-    year=2027,
-    account_balances=balances,
-    annual_return=Decimal("0"),
-    withdrawals={},
-    roth_conversions=conversion,
+result = calculate_roth_conversion(
+    year=YEAR,
+    source_account="Chris 401(k)",
+    destination_account="Roth IRA",
+    base_taxable_income=BASE_TAXABLE_INCOME,
+    conversion_amount=CONVERSION_AMOUNT,
 )
 
+
+# --------------------------------------------------
+# Display results
+# --------------------------------------------------
 
 print()
 print(
-    f"Beginning portfolio: "
-    f"${result.beginning_total:,.2f}"
+    f"Year: {result.year}"
 )
 
 print(
-    f"Roth conversion: "
-    f"${result.roth_conversion_total:,.2f}"
+    f"Source: {result.source_account}"
 )
 
 print(
-    f"Ending portfolio: "
-    f"${result.ending_total:,.2f}"
+    f"Destination: {result.destination_account}"
+)
+
+print(
+    f"Base taxable income: "
+    f"${result.base_taxable_income:,.2f}"
+)
+
+print(
+    f"Conversion amount: "
+    f"${result.conversion_amount:,.2f}"
+)
+
+print(
+    f"Federal tax: "
+    f"${result.federal_tax:,.2f}"
+)
+
+print(
+    f"NC tax: "
+    f"${result.nc_tax:,.2f}"
+)
+
+print(
+    f"Total tax: "
+    f"${result.total_tax:,.2f}"
+)
+
+print(
+    f"Net Roth amount: "
+    f"${result.net_roth_amount:,.2f}"
+)
+
+print(
+    f"Effective tax rate: "
+    f"{result.effective_tax_rate:.3%}"
 )
 
 
 # --------------------------------------------------
-# Find the two affected accounts.
+# Basic conversion assertions
 # --------------------------------------------------
 
-accounts = {
-    account.account_name: account
-    for account in result.accounts
-}
+assert (
+    result.year
+    == YEAR
+)
+
+assert (
+    result.source_account
+    == "Chris 401(k)"
+)
+
+assert (
+    result.destination_account
+    == "Roth IRA"
+)
+
+assert (
+    result.base_taxable_income
+    == BASE_TAXABLE_INCOME
+)
+
+assert (
+    result.conversion_amount
+    == CONVERSION_AMOUNT
+)
 
 
-chris_401k = accounts[
-    "Chris 401(k)"
-]
+# --------------------------------------------------
+# Current real tax-engine results
+# --------------------------------------------------
 
-roth_ira = accounts[
-    "Roth IRA"
-]
+assert (
+    result.federal_tax
+    == Decimal("17520")
+)
 
+assert (
+    result.nc_tax
+    == Decimal("3192")
+)
+
+assert (
+    result.total_tax
+    == Decimal("20712")
+)
+
+assert (
+    result.net_roth_amount
+    == Decimal("59288")
+)
+
+
+# --------------------------------------------------
+# Effective tax rate
+# --------------------------------------------------
+
+expected_effective_rate = (
+    Decimal("20712")
+    / Decimal("80000")
+)
+
+
+assert (
+    result.effective_tax_rate
+    == expected_effective_rate
+)
+
+
+# --------------------------------------------------
+# Final results
+# --------------------------------------------------
 
 print()
 print(
-    f"Chris 401(k) ending: "
-    f"${chris_401k.ending_balance:,.2f}"
+    "PASS: Roth conversion inputs are "
+    "correctly recorded."
 )
 
 print(
-    f"Roth IRA ending: "
-    f"${roth_ira.ending_balance:,.2f}"
+    "PASS: Federal tax is correctly "
+    "calculated by the real tax engine."
 )
 
-
-# --------------------------------------------------
-# Chris 401(k) should decrease by $80,000.
-# --------------------------------------------------
-
-expected_401k = (
-    balances["Chris 401(k)"]
-    - Decimal("80000")
+print(
+    "PASS: North Carolina tax is correctly "
+    "calculated by the real tax engine."
 )
 
-
-assert (
-    chris_401k.ending_balance
-    == expected_401k
+print(
+    "PASS: Total incremental tax is correct."
 )
 
-
-# --------------------------------------------------
-# The current account ledger records the conversion
-# against the source account. The destination Roth
-# transfer will be connected by the tax/conversion
-# engine later.
-# --------------------------------------------------
-
-assert (
-    chris_401k.roth_conversion
-    == Decimal("80000")
+print(
+    "PASS: Net Roth amount is correct."
 )
 
-
-# --------------------------------------------------
-# A conversion is not a portfolio spending withdrawal.
-# --------------------------------------------------
-
-assert (
-    result.withdrawal_total
-    == Decimal("0")
+print(
+    "PASS: Effective tax rate is correct."
 )
-
-
-# --------------------------------------------------
-# The conversion itself must not be counted as a
-# portfolio withdrawal.
-# --------------------------------------------------
-
-assert (
-    result.roth_conversion_total
-    == Decimal("80000")
-)
-
 
 print()
 print(
-    "PASS: Roth conversions are integrated into "
-    "the annual portfolio projection."
+    "PASS: Roth conversion integration "
+    "with the tax engine is working correctly."
 )

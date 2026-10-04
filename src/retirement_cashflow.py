@@ -41,7 +41,7 @@ def calculate_cashflow(year: int, month: int):
     )
 
     preliminary_portfolio_requirement = (
-        actual_spending
+        PLAN.monthly_spending_target
         - total_cash_available
     )
 

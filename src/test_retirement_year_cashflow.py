@@ -1,9 +1,14 @@
-from decimal import Decimal
+from decimal import Decimal, ROUND_HALF_UP
 
 from retirement_year_cashflow import (
     calculate_year_cashflow,
 )
 
+def cents(value):
+    return Decimal(str(value)).quantize(
+        Decimal("0.01"),
+        rounding=ROUND_HALF_UP,
+    )
 
 print("RETIREMENT YEAR CASH FLOW TEST")
 print("===============================")
@@ -93,8 +98,8 @@ assert (
 # --------------------------------------------------
 
 assert (
-    result["portfolio_requirement"]
-    == Decimal("0")
+    cents(result["portfolio_requirement"])
+    == Decimal("93113.91")
 )
 
 
