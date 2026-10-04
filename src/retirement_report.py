@@ -1,7 +1,17 @@
 from dataclasses import dataclass
 from decimal import Decimal
 
-from retirement_engine import RetirementYearResult
+from retirement_engine import (
+    RetirementEngineConfig,
+    RetirementYearResult,
+    run_retirement_engine,
+)
+
+from retirement_plan import (
+    PLAN,
+    build_base_taxable_income_schedule,
+    build_roth_conversion_schedule,
+)
 
 
 @dataclass
@@ -258,15 +268,45 @@ def print_retirement_report(
         )
 
 
-if __name__ == "__main__":
+def build_real_retirement_config() -> RetirementEngineConfig:
+    """
+    Build the production 2027-2040 retirement scenario.
 
-    from retirement_engine import (
-        RetirementEngineConfig,
-        run_retirement_engine,
+    The real-plan Roth conversion targets and taxable-income
+    assumptions come from RetirementPlan rather than being hidden
+    inside the retirement engine.
+    """
+
+    start_year = PLAN.retirement_start.year
+    end_year = PLAN.retirement_end_year
+
+    return RetirementEngineConfig(
+        start_year=start_year,
+        end_year=end_year,
+        annual_return=PLAN.annual_return_assumption,
+        monthly_spending_target=PLAN.monthly_spending_target,
+        retirement_start=PLAN.retirement_start,
+        prorate_first_retirement_year=True,
+        base_taxable_income_by_year=(
+            build_base_taxable_income_schedule(
+                start_year=start_year,
+                end_year=end_year,
+            )
+        ),
+        roth_conversions_by_year=(
+            build_roth_conversion_schedule(
+                start_year=start_year,
+                end_year=end_year,
+            )
+        ),
+        conversion_tax_funded_from_withdrawal=True,
     )
 
+
+if __name__ == "__main__":
+
     results = run_retirement_engine(
-        RetirementEngineConfig()
+        build_real_retirement_config()
     )
 
     rows = build_retirement_report(

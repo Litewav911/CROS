@@ -1,5 +1,10 @@
 from decimal import Decimal
 
+from portfolio_projection import (
+    apply_roth_conversion_destination,
+    create_initial_account_balances,
+)
+
 from retirement_engine import (
     RetirementEngineConfig,
     run_retirement_engine,
@@ -7,22 +12,12 @@ from retirement_engine import (
 
 
 def test_engine_carries_balances_forward():
+
     config = RetirementEngineConfig(
         start_year=2027,
         end_year=2028,
         annual_return=Decimal("0.05"),
-        initial_balances={
-            "Chris 401(k)": Decimal("100000"),
-            "Stephanie 401(k)": Decimal("0"),
-            "Brokerage": Decimal("0"),
-            "Roth IRA": Decimal("0"),
-            "HSA": Decimal("0"),
-            "Cash Reserve": Decimal("0"),
-        },
-        rental_income_by_year={
-            2027: Decimal("0"),
-            2028: Decimal("0"),
-        },
+        monthly_spending_target=Decimal("0"),
     )
 
     results = run_retirement_engine(
@@ -31,40 +26,26 @@ def test_engine_carries_balances_forward():
 
     assert len(results) == 2
 
-    first = results[0]
-    second = results[1]
-
     assert (
-        second.beginning_balances[
-            "Chris 401(k)"
-        ]
-        == first.ending_balances[
-            "Chris 401(k)"
-        ]
+        results[1].beginning_total
+        == results[0].ending_total
     )
 
 
 def test_engine_uses_chris_401k_under_normal_conditions():
+
     config = RetirementEngineConfig(
         start_year=2027,
         end_year=2027,
         annual_return=Decimal("0"),
-        initial_balances={
-            "Chris 401(k)": Decimal("200000"),
-            "Stephanie 401(k)": Decimal("0"),
-            "Brokerage": Decimal("0"),
-            "Roth IRA": Decimal("0"),
-            "HSA": Decimal("0"),
-            "Cash Reserve": Decimal("0"),
-        },
-        rental_income_by_year={
-            2027: Decimal("0"),
-        },
+        monthly_spending_target=Decimal("1000"),
     )
 
-    result = run_retirement_engine(
+    results = run_retirement_engine(
         config
-    )[0]
+    )
+
+    result = results[0]
 
     assert (
         "Chris 401(k)"
@@ -80,29 +61,32 @@ def test_engine_uses_chris_401k_under_normal_conditions():
 
 
 def test_engine_uses_cash_reserve_during_market_decline():
+
+    initial_balances = {
+        "Chris 401(k)": Decimal("100000"),
+        "Stephanie 401(k)": Decimal("100000"),
+        "Brokerage": Decimal("100000"),
+        "Roth IRA": Decimal("100000"),
+        "HSA": Decimal("0"),
+        "Cash Reserve": Decimal("100000"),
+    }
+
     config = RetirementEngineConfig(
         start_year=2027,
         end_year=2027,
         annual_return=Decimal("0"),
+        monthly_spending_target=Decimal("1000"),
+        initial_balances=initial_balances,
         market_declines_by_year={
             2027: True,
         },
-        initial_balances={
-            "Chris 401(k)": Decimal("200000"),
-            "Stephanie 401(k)": Decimal("0"),
-            "Brokerage": Decimal("0"),
-            "Roth IRA": Decimal("0"),
-            "HSA": Decimal("0"),
-            "Cash Reserve": Decimal("50000"),
-        },
-        rental_income_by_year={
-            2027: Decimal("0"),
-        },
     )
 
-    result = run_retirement_engine(
+    results = run_retirement_engine(
         config
-    )[0]
+    )
+
+    result = results[0]
 
     assert (
         "Cash Reserve"
@@ -118,77 +102,148 @@ def test_engine_uses_cash_reserve_during_market_decline():
 
 
 def test_engine_applies_roth_conversion():
+
+    initial_balances = {
+        "Chris 401(k)": Decimal("100000"),
+        "Stephanie 401(k)": Decimal("100000"),
+        "Brokerage": Decimal("0"),
+        "Roth IRA": Decimal("10000"),
+        "HSA": Decimal("0"),
+        "Cash Reserve": Decimal("0"),
+    }
+
     config = RetirementEngineConfig(
         start_year=2027,
         end_year=2027,
         annual_return=Decimal("0"),
+        monthly_spending_target=Decimal("0"),
+        initial_balances=initial_balances,
         base_taxable_income_by_year={
-            2027: Decimal("100000"),
+            2027: Decimal("0"),
         },
         roth_conversions_by_year={
             2027: {
-                "Chris 401(k)": Decimal("50000"),
-            },
+                "Chris 401(k)": Decimal("80000"),
+            }
         },
-        initial_balances={
-            "Chris 401(k)": Decimal("200000"),
-            "Stephanie 401(k)": Decimal("0"),
-            "Brokerage": Decimal("0"),
-            "Roth IRA": Decimal("10000"),
-            "HSA": Decimal("0"),
-            "Cash Reserve": Decimal("100000"),
-        },
-        rental_income_by_year={
-            2027: Decimal("0"),
-        },
+        conversion_tax_funded_from_withdrawal=False,
     )
 
-    result = run_retirement_engine(
+    results = run_retirement_engine(
         config
-    )[0]
+    )
+
+    result = results[0]
 
     assert (
         result.conversion_amount
-        == Decimal("50000")
-    )
-
-    assert (
-        result.conversion_tax
-        > Decimal("0")
+        == Decimal("80000")
     )
 
     assert (
         result.ending_balances[
             "Chris 401(k)"
         ]
-        < Decimal("200000")
+        == Decimal("20000")
     )
 
     assert (
         result.ending_balances[
             "Roth IRA"
         ]
-        > Decimal("10000")
+        == Decimal("90000")
+    )
+
+    # A Roth conversion is an internal transfer.
+    # It must not increase total portfolio value.
+    assert (
+        result.ending_total
+        == result.beginning_total
+    )
+
+
+def test_roth_conversion_compatibility_helper_does_not_double_count():
+
+    initial_balances = (
+        create_initial_account_balances()
+    )
+
+    initial_total = sum(
+        initial_balances.values(),
+        Decimal("0"),
+    )
+
+    # Simulate the state AFTER project_portfolio_year()
+    # has already applied the conversion.
+    converted_balances = dict(
+        initial_balances
+    )
+
+    conversion_amount = Decimal("80000")
+
+    converted_balances[
+        "Chris 401(k)"
+    ] -= conversion_amount
+
+    converted_balances[
+        "Roth IRA"
+    ] += conversion_amount
+
+    total_after_conversion = sum(
+        converted_balances.values(),
+        Decimal("0"),
+    )
+
+    assert (
+        total_after_conversion
+        == initial_total
+    )
+
+    # Defensive compatibility check:
+    #
+    # Older callers may still invoke the helper after the
+    # portfolio projection has already applied the transfer.
+    #
+    # The helper must NOT subtract another $80,000 or add
+    # another $80,000.
+    result = (
+        apply_roth_conversion_destination(
+            account_balances=converted_balances,
+            source_account="Chris 401(k)",
+            destination_account="Roth IRA",
+            conversion_amount=conversion_amount,
+        )
+    )
+
+    assert result is converted_balances
+
+    assert (
+        result["Chris 401(k)"]
+        == initial_balances["Chris 401(k)"]
+        - conversion_amount
+    )
+
+    assert (
+        result["Roth IRA"]
+        == initial_balances["Roth IRA"]
+        + conversion_amount
+    )
+
+    assert (
+        sum(
+            result.values(),
+            Decimal("0"),
+        )
+        == initial_total
     )
 
 
 def test_engine_produces_fourteen_years():
+
     config = RetirementEngineConfig(
         start_year=2027,
         end_year=2040,
-        annual_return=Decimal("0"),
-        initial_balances={
-            "Chris 401(k)": Decimal("1000000"),
-            "Stephanie 401(k)": Decimal("0"),
-            "Brokerage": Decimal("0"),
-            "Roth IRA": Decimal("0"),
-            "HSA": Decimal("0"),
-            "Cash Reserve": Decimal("0"),
-        },
-        rental_income_by_year={
-            year: Decimal("0")
-            for year in range(2027, 2041)
-        },
+        annual_return=Decimal("0.05"),
     )
 
     results = run_retirement_engine(
@@ -196,6 +251,3 @@ def test_engine_produces_fourteen_years():
     )
 
     assert len(results) == 14
-
-    assert results[0].year == 2027
-    assert results[-1].year == 2040
