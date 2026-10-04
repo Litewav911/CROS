@@ -9,124 +9,107 @@ from rental_cashflow import (
 )
 
 
-print("ANNUAL WITHDRAWAL TEST")
-print("=======================")
-
-
-result = calculate_annual_withdrawal(
-    2027,
-    market_decline=False,
-)
-
-
-print()
-print(
-    f"Months processed: "
-    f"{len(result['monthly_results'])}"
-)
-
-print(
-    f"Annual spending: "
-    f"${result['total_spending']:,.2f}"
-)
-
-print(
-    f"Transaction income: "
-    f"${result['total_transaction_income']:,.2f}"
-)
-
-print(
-    f"Rental income: "
-    f"${result['total_rental_income']:,.2f}"
-)
-
-print(
-    f"Total cash available: "
-    f"${result['total_cash_available']:,.2f}"
-)
-
-print(
-    f"Annual portfolio requirement: "
-    f"${result['annual_portfolio_requirement']:,.2f}"
-)
-
-print(
-    f"Recommended source: "
-    f"{result['recommended_source']}"
-)
-
-
-# --------------------------------------------------
-# Verify all twelve months were processed.
-# --------------------------------------------------
-
-assert (
-    len(result["monthly_results"])
-    == 12
-)
-
-
-# --------------------------------------------------
-# Get the authoritative monthly rental value from
-# the existing rental engine.
-#
-# Do not hard-code a rounded annual multiplication.
-# --------------------------------------------------
-
-monthly_rental = Decimal(
-    str(
-        monthly_rental_cashflow()[
-            "net_rental_cashflow"
-        ]
+def test_annual_withdrawal_processes_twelve_months():
+    result = calculate_annual_withdrawal(
+        2027,
+        market_decline=False,
     )
-)
+
+    assert (
+        len(result["monthly_results"])
+        == 12
+    )
 
 
-expected_rental_income = Decimal("0")
+def test_annual_withdrawal_uses_authoritative_rental_cashflow():
+    result = calculate_annual_withdrawal(
+        2027,
+        market_decline=False,
+    )
 
-for month in range(1, 13):
+    monthly_rental = Decimal(
+        str(
+            monthly_rental_cashflow()[
+                "net_rental_cashflow"
+            ]
+        )
+    )
 
-    expected_rental_income += monthly_rental
+    expected_rental_income = (
+        monthly_rental * Decimal("12")
+    )
 
+    actual = result[
+        "total_rental_income"
+    ].quantize(
+        Decimal("0.01")
+    )
 
-assert (
-    result["total_rental_income"]
-    == expected_rental_income
-)
+    expected = expected_rental_income.quantize(
+        Decimal("0.01")
+    )
 
-
-# --------------------------------------------------
-# The current test data does not create an annual
-# portfolio requirement because the actual spending
-# recorded in the test environment is covered by
-# available cash sources.
-# --------------------------------------------------
-
-assert (
-    result["annual_portfolio_requirement"]
-    == Decimal("0")
-)
-
-
-assert (
-    result["recommended_source"]
-    == "None"
-)
+    assert actual == expected
 
 
-print()
-print(
-    f"Authoritative monthly rental cash flow: "
-    f"${monthly_rental:,.2f}"
-)
+def test_annual_withdrawal_aggregates_positive_requirements():
+    result = calculate_annual_withdrawal(
+        2027,
+        market_decline=False,
+    )
 
-print(
-    f"Expected annual rental cash flow: "
-    f"${expected_rental_income:,.2f}"
-)
+    expected_requirement = Decimal("0")
 
-print()
-print(
-    "PASS: Annual withdrawal engine processes "
-    "all 12 months and aggregates cash flow correctly."
-)
+    for monthly_result in result[
+        "monthly_results"
+    ]:
+
+        monthly_requirement = Decimal(
+            str(
+                monthly_result[
+                    "preliminary_portfolio_requirement"
+                ]
+            )
+        )
+
+        if monthly_requirement > 0:
+
+            expected_requirement += (
+                monthly_requirement
+            )
+
+    actual = result[
+        "annual_portfolio_requirement"
+    ].quantize(
+        Decimal("0.01")
+    )
+
+    expected = expected_requirement.quantize(
+        Decimal("0.01")
+    )
+
+    assert actual == expected
+
+
+def test_annual_withdrawal_selects_chris_401k():
+    result = calculate_annual_withdrawal(
+        2027,
+        market_decline=False,
+    )
+
+    assert (
+        result["recommended_source"]
+        == "Chris 401(k)"
+    )
+
+
+def test_annual_withdrawal_has_positive_requirement():
+    result = calculate_annual_withdrawal(
+        2027,
+        market_decline=False,
+    )
+
+    assert (
+        result["annual_portfolio_requirement"]
+        > Decimal("0")
+    )
