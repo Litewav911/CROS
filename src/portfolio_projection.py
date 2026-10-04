@@ -3,9 +3,14 @@ from decimal import Decimal
 from typing import List
 
 from retirement_accounts import RETIREMENT_ACCOUNTS
+
 from annual_account_projection import (
     AnnualAccountProjection,
     project_account_year,
+)
+
+from annual_withdrawal import (
+    calculate_annual_withdrawal,
 )
 
 
@@ -35,15 +40,6 @@ def project_portfolio_year(
     Project all modeled retirement accounts for one year.
 
     withdrawals maps account names to withdrawal amounts.
-
-    Example:
-
-        {
-            "Chris 401(k)": Decimal("60000")
-        }
-
-    The withdrawal is applied only to the specified
-    account.
     """
 
     if withdrawals is None:
@@ -158,27 +154,27 @@ def project_portfolio_years(
     end_year: int,
     annual_return: Decimal = Decimal("0"),
     withdrawals_by_year=None,
+    market_declines_by_year=None,
 ):
     """
     Project the portfolio across multiple years.
 
-    Each year's ending account balances become the
-    following year's beginning balances.
+    If withdrawals_by_year is supplied, those explicit
+    withdrawals are used.
 
-    withdrawals_by_year should have this structure:
+    Otherwise the annual withdrawal engine determines
+    the withdrawal for each year.
 
-        {
-            2027: {
-                "Chris 401(k)": Decimal("60000")
-            },
-            2028: {
-                "Chris 401(k)": Decimal("65000")
-            }
-        }
+    market_declines_by_year allows the existing
+    withdrawal strategy to select the cash reserve
+    during specified market-decline years.
     """
 
     if withdrawals_by_year is None:
         withdrawals_by_year = {}
+
+    if market_declines_by_year is None:
+        market_declines_by_year = {}
 
     account_balances = (
         create_initial_account_balances()
@@ -191,10 +187,50 @@ def project_portfolio_years(
         end_year + 1,
     ):
 
-        withdrawals = withdrawals_by_year.get(
-            year,
-            {},
-        )
+        if year in withdrawals_by_year:
+
+            withdrawals = withdrawals_by_year[
+                year
+            ]
+
+        else:
+
+            annual_withdrawal = (
+                calculate_annual_withdrawal(
+                    year=year,
+                    market_decline=(
+                        market_declines_by_year.get(
+                            year,
+                            False,
+                        )
+                    ),
+                )
+            )
+
+            source = (
+                annual_withdrawal[
+                    "recommended_source"
+                ]
+            )
+
+            amount = Decimal(
+                str(
+                    annual_withdrawal[
+                        "annual_portfolio_requirement"
+                    ]
+                )
+            )
+
+            if (
+                source == "None"
+                or amount <= 0
+            ):
+                withdrawals = {}
+
+            else:
+                withdrawals = {
+                    source: amount
+                }
 
         projection = project_portfolio_year(
             year=year,
@@ -226,7 +262,7 @@ def print_portfolio_projection(
         f"{projection.year}"
     )
 
-    print("=" * 85)
+    print("=" * 105)
 
     print(
         f"{'Account':30}"
@@ -261,17 +297,10 @@ def print_portfolio_projection(
 
 if __name__ == "__main__":
 
-    withdrawals = {
-        2027: {
-            "Chris 401(k)": Decimal("60000"),
-        }
-    }
-
     projections = project_portfolio_years(
         start_year=2027,
         end_year=2040,
         annual_return=Decimal("0.05"),
-        withdrawals_by_year=withdrawals,
     )
 
     for projection in projections:
