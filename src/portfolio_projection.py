@@ -1,5 +1,5 @@
-from dataclasses import dataclass
 from decimal import Decimal
+from dataclasses import dataclass
 from typing import List
 
 from retirement_accounts import RETIREMENT_ACCOUNTS
@@ -17,8 +17,8 @@ from annual_withdrawal import (
 @dataclass
 class PortfolioProjection:
     """
-    Represents the consolidated household portfolio
-    for one projection year.
+    Consolidated household portfolio projection
+    for one year.
     """
 
     year: int
@@ -37,6 +37,22 @@ def project_portfolio_year(
     withdrawals: dict[str, Decimal] | None = None,
     roth_conversions: dict[str, Decimal] | None = None,
 ) -> PortfolioProjection:
+    """
+    Project all modeled accounts for one year.
+
+    Investment growth is applied first.
+
+    Withdrawals and Roth conversions are then applied
+    against the account value after investment growth.
+
+    Roth conversions are transfers within the portfolio:
+
+        - traditional source account decreases
+        - Roth IRA increases by the same gross amount
+
+    Roth conversion taxes are calculated separately by
+    the tax engine and are NOT deducted here.
+    """
 
     if withdrawals is None:
         withdrawals = {}
@@ -81,31 +97,49 @@ def project_portfolio_year(
             )
         )
 
+        if beginning_balance < 0:
+            raise ValueError(
+                f"Beginning balance cannot be negative "
+                f"for {account.name}."
+            )
+
         if withdrawal < 0:
             raise ValueError(
-                "Withdrawal cannot be negative."
+                f"Withdrawal cannot be negative "
+                f"for {account.name}."
             )
 
         if roth_conversion < 0:
             raise ValueError(
-                "Roth conversion cannot be negative."
-            )
-
-        if (
-            withdrawal
-            + roth_conversion
-            > beginning_balance
-        ):
-            raise ValueError(
-                f"Withdrawal plus Roth conversion "
-                f"exceeds the beginning balance for "
-                f"{account.name}."
+                f"Roth conversion cannot be negative "
+                f"for {account.name}."
             )
 
         investment_gain = (
             beginning_balance
             * annual_return
         )
+
+        available_after_growth = (
+            beginning_balance
+            + investment_gain
+        )
+
+        total_outflow = (
+            withdrawal
+            + roth_conversion
+        )
+
+        if total_outflow > available_after_growth:
+            raise ValueError(
+                f"Withdrawal plus Roth conversion exceeds "
+                f"the available balance after investment "
+                f"growth for {account.name}. "
+                f"Available: "
+                f"${available_after_growth:,.2f}; "
+                f"Required: "
+                f"${total_outflow:,.2f}."
+            )
 
         projection = project_account_year(
             year=year,
@@ -116,9 +150,7 @@ def project_portfolio_year(
             roth_conversion=roth_conversion,
         )
 
-        account_projections.append(
-            projection
-        )
+        account_projections.append(projection)
 
         beginning_total += (
             projection.beginning_balance
@@ -140,6 +172,39 @@ def project_portfolio_year(
             projection.ending_balance
         )
 
+    total_conversion = sum(
+        (
+            Decimal(str(amount))
+            for amount in roth_conversions.values()
+        ),
+        Decimal("0"),
+    )
+
+    if total_conversion > 0:
+
+        roth_found = False
+
+        for account in account_projections:
+
+            if account.account_name == "Roth IRA":
+
+                account.ending_balance += (
+                    total_conversion
+                )
+
+                ending_total += (
+                    total_conversion
+                )
+
+                roth_found = True
+                break
+
+        if not roth_found:
+            raise ValueError(
+                "Roth IRA account is required "
+                "for Roth conversions."
+            )
+
     return PortfolioProjection(
         year=year,
         accounts=account_projections,
@@ -152,6 +217,10 @@ def project_portfolio_year(
 
 
 def create_initial_account_balances():
+    """
+    Create the initial account-balance dictionary
+    from the retirement account model.
+    """
 
     return {
         account.name: Decimal(
@@ -169,6 +238,45 @@ def project_portfolio_years(
     roth_conversions_by_year=None,
     market_declines_by_year=None,
 ):
+    """
+    Project the portfolio across multiple years.
+
+    Explicit annual withdrawals take precedence over
+    the annual withdrawal engine.
+
+    If no explicit withdrawal exists for a year,
+    calculate_annual_withdrawal() determines the
+    withdrawal source and amount.
+
+    Roth conversions are supplied as:
+
+        {
+            2027: {
+                "Chris 401(k)": Decimal("80000")
+            },
+            2028: {
+                "Chris 401(k)": Decimal("80000")
+            }
+        }
+
+    Roth conversion taxes are calculated separately
+    by the tax/conversion engine and are not deducted
+    from portfolio balances.
+    """
+
+    if start_year > end_year:
+        raise ValueError(
+            "start_year cannot be greater than end_year."
+        )
+
+    annual_return = Decimal(
+        str(annual_return)
+    )
+
+    if annual_return < 0:
+        raise ValueError(
+            "Annual return cannot be negative."
+        )
 
     if withdrawals_by_year is None:
         withdrawals_by_year = {}
@@ -192,9 +300,11 @@ def project_portfolio_years(
 
         if year in withdrawals_by_year:
 
-            withdrawals = withdrawals_by_year[
-                year
-            ]
+            withdrawals = {
+                account: Decimal(str(amount))
+                for account, amount
+                in withdrawals_by_year[year].items()
+            }
 
         else:
 
@@ -228,19 +338,27 @@ def project_portfolio_years(
                 source == "None"
                 or amount <= 0
             ):
+
                 withdrawals = {}
 
             else:
+
                 withdrawals = {
                     source: amount
                 }
 
-        roth_conversions = (
+        explicit_roth_conversions = (
             roth_conversions_by_year.get(
                 year,
                 {},
             )
         )
+
+        roth_conversions = {
+            account: Decimal(str(amount))
+            for account, amount
+            in explicit_roth_conversions.items()
+        }
 
         projection = project_portfolio_year(
             year=year,
@@ -266,6 +384,9 @@ def project_portfolio_years(
 def print_portfolio_projection(
     projection: PortfolioProjection,
 ):
+    """
+    Print a detailed single-year portfolio projection.
+    """
 
     print()
     print(
