@@ -10,6 +10,7 @@ from retirement_plan import (
     PLAN,
     build_base_taxable_income_schedule,
     build_roth_conversion_schedule,
+    build_social_security_other_income_schedule,
 )
 
 
@@ -56,6 +57,12 @@ def build_real_retirement_config() -> RetirementEngineConfig:
         initial_balances=STARTING_BALANCES.copy(),
         base_taxable_income_by_year=(
             build_base_taxable_income_schedule(
+                start_year=START_YEAR,
+                end_year=END_YEAR,
+            )
+        ),
+        social_security_other_income_by_year=(
+            build_social_security_other_income_schedule(
                 start_year=START_YEAR,
                 end_year=END_YEAR,
             )

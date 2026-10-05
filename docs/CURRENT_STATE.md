@@ -11,10 +11,10 @@ The planning horizon is 2027–2040, with retirement beginning in 2027. The appl
 ## Current Git State
 
 - Branch: `master`
-- Latest commit: `edc01de` - Correct Social Security taxable benefit tiers
+- Latest commit: `411c87d` - Model Social Security provisional income separately
 - Remote: `origin/master`
-- `master` was synchronized with `origin/master` at `edc01de` before the current local changes.
-- Current uncommitted changes are in `docs/CURRENT_STATE.md`, `src/retirement_engine.py`, `src/roth_conversion_integration.py`, `src/tax_engine.py`, and `src/test_retirement_engine.py`.
+- `master` was synchronized with `origin/master` at `411c87d` before the current local changes.
+- Current uncommitted changes are in `docs/CURRENT_STATE.md`, `src/real_retirement_scenario.py`, `src/retirement_plan.py`, `src/retirement_report.py`, and `src/test_real_retirement_scenario.py`.
 
 Run `git status -sb` and `git log` before relying on this snapshot; repository state may have changed since it was written.
 
@@ -53,7 +53,7 @@ The taxable-benefit calculation now caps the 50% tier at the interval between th
 
 The Social Security tests cover below-threshold income, partial taxation, the 50% tier, the 85% tier before the benefit cap, the maximum taxable benefit, zero benefits, and negative-input validation.
 
-The retirement engine passes Social Security benefits into federal Roth-conversion and tax-deferred-withdrawal calculations. Federal tax is calculated on ordinary taxable income plus taxable Social Security, while a separate `social_security_other_income_by_year` input can supply the non-Social-Security income component used for provisional income. Conversions and withdrawals are added to both ordinary taxable income and this provisional-income component. If the separate input is omitted, the engine preserves compatibility by using base taxable income for provisional income. The real scenario has not yet populated the separate input from actual income data, so it currently uses that fallback. Gross Social Security remains included in outside cash income. North Carolina conversion and withdrawal tax remains calculated using its current flat-rate model.
+The retirement engine passes Social Security benefits into federal Roth-conversion and tax-deferred-withdrawal calculations. Federal tax is calculated on ordinary taxable income plus taxable Social Security, while a separate `social_security_other_income_by_year` input supplies the non-Social-Security income component used for provisional income. Conversions and withdrawals are added to both ordinary taxable income and this provisional-income component. If the separate input is omitted, the engine preserves compatibility by using base taxable income for provisional income. The real scenario now explicitly populates the schedule using its existing $100,000 annual base taxable-income assumption. This is only a proxy: CROS has no separate gross-income or tax-exempt-interest assumptions yet, and the real scenario currently defaults Social Security benefits to zero. Gross Social Security remains included in outside cash income when a benefit amount is supplied. North Carolina conversion and withdrawal tax remains calculated using its current flat-rate model.
 
 ## Current Test Coverage
 
@@ -61,11 +61,11 @@ The retirement engine passes Social Security benefits into federal Roth-conversi
 
 The retirement engine tests include regression coverage for separate provisional-income inputs in conversion and withdrawal taxation. The retirement engine, report, real retirement scenario, annual withdrawal, Social Security tax, and withdrawal engine also have pytest coverage under `src/`.
 
-The latest full test run collected 66 tests and completed with 66 passed and 0 failed using Python 3.14.8 and pytest 9.1.1.
+The latest full test run collected 67 tests and completed with 67 passed and 0 failed using Python 3.14.8 and pytest 9.1.1.
 
 ## Recommended Next Development Step
 
-Populate `social_security_other_income_by_year` in the real retirement scenario from its income assumptions, including tax-exempt interest where applicable. The current scenario still falls back to `base_taxable_income_by_year`; reconcile those inputs against the income sources available in CROS before treating the projection as an actual tax estimate.
+Replace the provisional-income proxy and zero Social Security benefit default with annual income and benefit assumptions sourced from CROS's actual data. The repository currently lacks gross non-Social-Security income and tax-exempt-interest inputs, so those values must be added before the Social Security tax projection can be treated as an actual estimate.
 
 ## Development Workflow
 

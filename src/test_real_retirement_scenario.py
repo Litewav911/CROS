@@ -2,8 +2,10 @@ from decimal import Decimal, ROUND_HALF_UP
 
 from real_retirement_scenario import (
     CASH_RESERVE,
+    build_real_retirement_config,
     run_real_retirement_scenario,
 )
+from retirement_plan import PLAN
 
 
 CENT = Decimal("0.01")
@@ -28,6 +30,19 @@ def test_real_retirement_scenario_produces_fourteen_years():
 
     assert results[0].year == 2027
     assert results[-1].year == 2040
+
+
+def test_real_retirement_config_supplies_provisional_income_schedule():
+
+    config = build_real_retirement_config()
+
+    assert config.social_security_other_income_by_year == {
+        year: PLAN.annual_base_taxable_income
+        for year in range(
+            PLAN.retirement_start.year,
+            PLAN.retirement_end_year + 1,
+        )
+    }
 
 
 def test_real_retirement_scenario_uses_partial_first_year():

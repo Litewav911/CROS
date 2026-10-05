@@ -157,6 +157,23 @@ def build_base_taxable_income_schedule(
     }
 
 
+def build_social_security_other_income_schedule(
+    start_year: int | None = None,
+    end_year: int | None = None,
+) -> dict[int, Decimal]:
+    """Build the provisional-income proxy available in the plan.
+
+    CROS currently has no separate gross-income or tax-exempt
+    interest assumptions. Use the existing base taxable-income
+    assumption explicitly until those inputs are available.
+    """
+
+    return build_base_taxable_income_schedule(
+        start_year=start_year,
+        end_year=end_year,
+    )
+
+
 def print_plan():
     """
     Print the current CROS retirement-plan assumptions.
