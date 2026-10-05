@@ -337,14 +337,10 @@ def _withdrawal_tax(
     if withdrawal_amount <= ZERO:
         return ZERO
 
-    result = calculate_withdrawal_tax_mfj_2026(
+    return calculate_withdrawal_tax_mfj_2026(
         base_taxable_income=base_taxable_income,
         conversion_amount=conversion_amount,
         withdrawal_amount=withdrawal_amount,
-    )
-
-    return _to_decimal(
-        result.tax
     )
 
 
