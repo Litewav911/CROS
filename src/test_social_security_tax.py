@@ -22,16 +22,16 @@ def test_social_security_partially_taxable_for_mfj():
     taxable = (
         calculate_social_security_taxable_benefit_mfj(
             social_security_benefits=Decimal("20000"),
-            other_income=Decimal("15000"),
+            other_income=Decimal("25000"),
         )
     )
 
     # Provisional income:
     #
-    # 15,000 + 10,000 = 25,000
+    # 25,000 + 10,000 = 35,000
     #
-    # Below $32,000.
-    assert taxable == Decimal("0")
+    # (35,000 - 32,000) * 50% = 1,500
+    assert taxable == Decimal("1500.00")
 
 
 def test_social_security_50_percent_tier_for_mfj():
@@ -39,16 +39,16 @@ def test_social_security_50_percent_tier_for_mfj():
     taxable = (
         calculate_social_security_taxable_benefit_mfj(
             social_security_benefits=Decimal("30000"),
-            other_income=Decimal("10000"),
+            other_income=Decimal("25000"),
         )
     )
 
     # Provisional income:
     #
-    # 10,000 + 15,000 = 25,000
+    # 25,000 + 15,000 = 40,000
     #
-    # Still below $32,000.
-    assert taxable == Decimal("0")
+    # (40,000 - 32,000) * 50% = 4,000
+    assert taxable == Decimal("4000.00")
 
 
 def test_social_security_crosses_first_mfj_threshold():
@@ -82,6 +82,20 @@ def test_social_security_above_second_mfj_threshold():
 
     # The 85% cap applies.
     assert taxable == Decimal("42500.00")
+
+
+def test_social_security_85_percent_tier_before_benefit_cap():
+
+    taxable = (
+        calculate_social_security_taxable_benefit_mfj(
+            social_security_benefits=Decimal("50000"),
+            other_income=Decimal("25000"),
+        )
+    )
+
+    # Provisional income is $50,000. The first tier contributes
+    # $6,000 and the amount above $44,000 contributes $5,100.
+    assert taxable == Decimal("11100.00")
 
 
 def test_social_security_taxable_amount_never_exceeds_85_percent():

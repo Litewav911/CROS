@@ -1,179 +1,72 @@
-﻿# CROS - Current Development State
+# CROS - Current Development State
 
 ## Project
 
-CROS is a retirement-planning software project being developed as a Python application.
-
-The repository is:
+CROS is a Python retirement-planning application maintained in Git at:
 
 C:\cloud\CROS
 
-The project is maintained with Git.
+The planning horizon is 2027–2040, with retirement beginning in 2027. The application is intended to use actual household financial data to model spending, income, investments, withdrawals, Roth conversions, taxes, Social Security, IRMAA, and year-by-year retirement outcomes.
 
 ## Current Git State
 
-Current branch:
+- Branch: `master`
+- Latest commit: `e5fc9fc` - Integrate tax, Social Security, and withdrawals
+- Remote: `origin/master`
+- `master` was synchronized with `origin/master` at `e5fc9fc` before the current local changes.
+- Current uncommitted changes are in `docs/CURRENT_STATE.md`, `src/tax_engine.py`, and `src/test_social_security_tax.py`.
 
-master
+Run `git status -sb` and `git log` before relying on this snapshot; repository state may have changed since it was written.
 
-Last committed baseline at the beginning of the Codex migration:
+## Codex Migration
 
-8ff013c - Integrate tax engine with retirement withdrawals
+The migration to Codex is complete. The repository contains `AGENTS.md` with the mandatory CROS workflow and project rules. The migration documentation was committed in `469002a`.
 
-The working tree contains uncommitted CROS development work. That work must be preserved and must not be discarded during the migration to Codex.
+## Implemented Tax Engine Work
 
-## Current Uncommitted Files
+The tax engine currently supports:
 
-The following files were modified or added when the Codex migration began:
-
-- src/tax_engine.py
-- src/test_real_tax_engine.py
-- src/test_social_security_tax.py
-- CROSFormatForGPT.txt
-
-## Current Tax Engine Work
-
-The current development work is extending the tax engine to support:
-
-- Federal MFJ progressive tax calculations.
+- Federal Married Filing Jointly progressive tax calculations using the 2026 brackets.
 - North Carolina tax calculations.
-- Incremental federal tax.
-- Incremental North Carolina tax.
+- Incremental federal and North Carolina taxes.
 - Roth conversion tax calculations.
 - Tax-deferred retirement withdrawal tax calculations.
 - Social Security taxable-benefit calculations for Married Filing Jointly.
 
-## Social Security Tax Work
+`calculate_conversion_tax_mfj_2026(base_taxable_income, conversion_amount)` returns a `TaxResult` with `taxable_income` and `tax` fields.
 
-The tax engine currently contains:
+`calculate_withdrawal_tax_mfj_2026(base_taxable_income, conversion_amount=Decimal("0"), withdrawal_amount=None)` returns a `Decimal`. For backward compatibility, a two-argument call treats the second argument as the withdrawal amount. Its incremental tax calculation includes the base taxable income and Roth conversion before the withdrawal.
 
-- SOCIAL_SECURITY_MFJ_FIRST_THRESHOLD = $32,000
-- SOCIAL_SECURITY_MFJ_SECOND_THRESHOLD = $44,000
-- First-tier taxable rate = 50%
-- Second-tier taxable rate = 85%
-- Maximum taxable Social Security = 85% of benefits.
+## Social Security Tax
 
-The current public function is:
+The Social Security calculation uses these MFJ thresholds and rates:
 
-calculate_social_security_taxable_benefit_mfj(
-    social_security_benefits,
-    other_income
-)
+- First threshold: $32,000.
+- Second threshold: $44,000.
+- First-tier taxable rate: 50%.
+- Second-tier taxable rate: 85%.
+- Maximum taxable benefit: 85% of benefits.
 
-The current Social Security tests are in:
+The public function is `calculate_social_security_taxable_benefit_mfj(social_security_benefits, other_income)`. Tests are in `src/test_social_security_tax.py`.
 
-src/test_social_security_tax.py
+The taxable-benefit calculation now caps the 50% tier at the interval between the thresholds and at 50% of benefits. Above the second threshold, it applies the 85% rate to the excess and caps total taxable benefits at 85% of benefits.
 
-These tests cover:
+The Social Security tests cover below-threshold income, partial taxation, the 50% tier, the 85% tier before the benefit cap, the maximum taxable benefit, zero benefits, and negative-input validation.
 
-- Benefits below the MFJ threshold.
-- Partial taxation after crossing the first threshold.
-- Higher provisional income.
-- The 85% maximum taxable-benefit limit.
-- Zero Social Security.
-- Negative Social Security validation.
-- Negative other-income validation.
+## Current Test Coverage
 
-## Withdrawal Tax Work
+`src/test_real_tax_engine.py` contains pytest coverage for progressive and flat tax, deductions, federal brackets, incremental tax, federal and North Carolina taxes, Roth conversion tax, validation, decimal string inputs, and a retirement tax scenario.
 
-The current withdrawal-tax interface is:
+The retirement engine, report, real retirement scenario, annual withdrawal, Social Security tax, and withdrawal engine also have pytest coverage under `src/`.
 
-calculate_withdrawal_tax_mfj_2026(
-    base_taxable_income,
-    conversion_amount=Decimal("0"),
-    withdrawal_amount=None
-)
+The latest focused Social Security test run completed with 10 passed. The latest full test run completed with 62 passed and 0 failed using Python 3.14.8 and pytest 9.1.1. The full suite was rerun after the current formula changes and passed again with 62 passed and 0 failed.
 
-The function supports backward compatibility when called with two arguments by treating the second argument as withdrawal amount.
+## Recommended Next Development Step
 
-The intended calculation is:
+Review how the taxable Social Security benefit is supplied to annual retirement tax calculations. Determine whether taxable benefits should feed the engine's existing taxable-income inputs, then define an integration test before changing that flow.
 
-Tax(base taxable income + Roth conversion + withdrawal)
-minus
-Tax(base taxable income + Roth conversion)
+## Development Workflow
 
-for the incremental federal component, with the corresponding incremental North Carolina tax.
+Follow `AGENTS.md`. Work one step at a time, inspect the current repository state and relevant source/tests before changes, preserve existing work, and avoid unrelated edits. Run relevant pytest tests after code changes and the full pytest suite for significant changes. Review the diff before committing.
 
-## Roth Conversion Tax Work
-
-The current conversion-tax interface is:
-
-calculate_conversion_tax_mfj_2026(
-    base_taxable_income,
-    conversion_amount
-)
-
-It returns a TaxResult containing:
-
-- taxable_income
-- tax
-
-The tax combines incremental federal and North Carolina tax caused by the Roth conversion.
-
-## Current Test Work
-
-src/test_real_tax_engine.py has been expanded from a manually executed script into pytest tests.
-
-The tests currently cover:
-
-- Progressive tax.
-- Flat tax.
-- Standard deductions.
-- Federal MFJ tax brackets.
-- Incremental tax.
-- Federal incremental tax.
-- North Carolina incremental tax.
-- Roth conversion tax.
-- Zero conversion tax.
-- Negative-input validation.
-- A real retirement tax scenario.
-- Decimal string inputs.
-- Progressive conversion taxation.
-
-## Important Working Rules
-
-CROS development uses these rules:
-
-1. Work one step at a time.
-2. Do not guess project state.
-3. Preserve uncommitted work.
-4. Make only changes required for the current task.
-5. Do not modify unrelated files.
-6. Code changes should normally be complete known-good file replacements.
-7. Run relevant tests after code changes.
-8. Run the full pytest suite before declaring significant work complete.
-9. Review git diff before committing.
-10. Never discard existing work without explicit authorization.
-
-The complete Codex operating rules are stored in:
-
-AGENTS.md
-
-## Migration to Codex
-
-The migration is currently in progress.
-
-Completed:
-
-- Repository identified as C:\cloud\CROS.
-- Existing Git state inspected.
-- Existing uncommitted development work identified.
-- AGENTS.md created and verified.
-
-Next migration tasks:
-
-1. Complete CURRENT_STATE.md.
-2. Review the migration documentation.
-3. Verify the repository contents.
-4. Commit the migration documentation without discarding current development work.
-5. Open C:\cloud\CROS in Codex.
-6. Have Codex inspect the repository before making changes.
-7. Have Codex run the existing pytest suite.
-8. Confirm Codex understands the project instructions and current state.
-9. Resume CROS development under Codex.
-
-## Important
-
-Do not treat this document as a substitute for inspecting the actual source code, tests, Git history, or current working tree.
-
-This document describes the known state at the beginning of the Codex migration. The repository itself remains the authoritative source of truth.
+This document is a state snapshot, not a substitute for inspecting the repository, source code, tests, Git history, or current working tree.

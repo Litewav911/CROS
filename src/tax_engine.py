@@ -420,12 +420,17 @@ def calculate_social_security_taxable_benefit_mfj(
     first_tier_income = min(
         provisional_income
         - SOCIAL_SECURITY_MFJ_FIRST_THRESHOLD,
-        SOCIAL_SECURITY_MFJ_FIRST_THRESHOLD,
+        SOCIAL_SECURITY_MFJ_SECOND_THRESHOLD
+        - SOCIAL_SECURITY_MFJ_FIRST_THRESHOLD,
     )
 
     taxable = (
-        first_tier_income
-        * SOCIAL_SECURITY_TAXABLE_RATE_FIRST_TIER
+        min(
+            social_security_benefits
+            * SOCIAL_SECURITY_TAXABLE_RATE_FIRST_TIER,
+            first_tier_income
+            * SOCIAL_SECURITY_TAXABLE_RATE_FIRST_TIER,
+        )
     )
 
     if (
