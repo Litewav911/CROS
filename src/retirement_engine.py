@@ -57,6 +57,10 @@ class RetirementEngineConfig:
         default_factory=dict
     )
 
+    social_security_other_income_by_year: dict[
+        int, Decimal
+    ] = field(default_factory=dict)
+
     roth_conversions_by_year: dict[
         int,
         dict[str, Decimal],
@@ -251,11 +255,27 @@ def _base_taxable_income(
     )
 
 
+def _social_security_other_income(
+    config: RetirementEngineConfig,
+    year: int,
+    base_taxable_income: Decimal,
+) -> Decimal:
+    """Return income used to calculate Social Security taxability."""
+    return _to_decimal(
+        config.social_security_other_income_by_year.get(
+            year,
+            base_taxable_income,
+        )
+    )
+
+
 def _conversion_tax_for_account(
     year: int,
     source_account: str,
     base_taxable_income: Decimal,
     conversion_amount: Decimal,
+    social_security_benefits: Decimal = ZERO,
+    provisional_other_income: Decimal | None = None,
 ) -> Decimal:
     """
     Calculate incremental federal + NC tax for one
@@ -285,6 +305,8 @@ def _conversion_tax_for_account(
         destination_account="Roth IRA",
         base_taxable_income=base_taxable_income,
         conversion_amount=conversion_amount,
+        social_security_benefits=social_security_benefits,
+        provisional_other_income=provisional_other_income,
     )
 
     return _to_decimal(
@@ -296,12 +318,20 @@ def _total_conversion_tax(
     year: int,
     base_taxable_income: Decimal,
     roth_conversions: Mapping[str, Decimal],
+    social_security_benefits: Decimal = ZERO,
+    provisional_other_income: Decimal | None = None,
 ) -> Decimal:
     """
     Calculate total tax for all requested Roth conversions.
     """
 
     total_tax = ZERO
+    taxable_income_so_far = base_taxable_income
+    provisional_income_so_far = (
+        base_taxable_income
+        if provisional_other_income is None
+        else provisional_other_income
+    )
 
     for source_account, conversion_amount in (
         roth_conversions.items()
@@ -310,9 +340,14 @@ def _total_conversion_tax(
         total_tax += _conversion_tax_for_account(
             year=year,
             source_account=source_account,
-            base_taxable_income=base_taxable_income,
+            base_taxable_income=taxable_income_so_far,
             conversion_amount=conversion_amount,
+            social_security_benefits=social_security_benefits,
+            provisional_other_income=provisional_income_so_far,
         )
+
+        taxable_income_so_far += conversion_amount
+        provisional_income_so_far += conversion_amount
 
     return total_tax
 
@@ -321,6 +356,8 @@ def _withdrawal_tax(
     base_taxable_income: Decimal,
     conversion_amount: Decimal,
     withdrawal_amount: Decimal,
+    social_security_benefits: Decimal = ZERO,
+    provisional_other_income: Decimal | None = None,
 ) -> Decimal:
     """
     Calculate incremental tax caused by a traditional
@@ -341,6 +378,8 @@ def _withdrawal_tax(
         base_taxable_income=base_taxable_income,
         conversion_amount=conversion_amount,
         withdrawal_amount=withdrawal_amount,
+        social_security_benefits=social_security_benefits,
+        provisional_other_income=provisional_other_income,
     )
 
 
@@ -349,6 +388,8 @@ def _gross_up_tax_deferred_withdrawal(
     base_taxable_income: Decimal,
     conversion_amount: Decimal,
     maximum_available: Decimal,
+    social_security_benefits: Decimal = ZERO,
+    provisional_other_income: Decimal | None = None,
 ) -> tuple[Decimal, Decimal]:
     """
     Find the gross tax-deferred withdrawal required to
@@ -377,6 +418,8 @@ def _gross_up_tax_deferred_withdrawal(
             base_taxable_income,
             conversion_amount,
             gross,
+            social_security_benefits,
+            provisional_other_income,
         )
 
         return (
@@ -488,6 +531,8 @@ def _allocate_withdrawal(
     conversion_amount: Decimal,
     market_decline: bool,
     reserved_for_conversions: Mapping[str, Decimal] | None = None,
+    social_security_benefits: Decimal = ZERO,
+    provisional_other_income: Decimal | None = None,
 ) -> tuple[
     dict[str, Decimal],
     Decimal,
@@ -515,6 +560,7 @@ def _allocate_withdrawal(
     total_gross = ZERO
     total_tax = ZERO
     total_net = ZERO
+    taxable_withdrawals_so_far = ZERO
 
     for account_name in _withdrawal_priority(
         market_decline
@@ -558,13 +604,22 @@ def _allocate_withdrawal(
             gross, tax = (
                 _gross_up_tax_deferred_withdrawal(
                     remaining_net,
-                    base_taxable_income,
+                    base_taxable_income
+                    + taxable_withdrawals_so_far,
                     conversion_amount,
                     available,
+                    social_security_benefits,
+                    (
+                        None
+                        if provisional_other_income is None
+                        else provisional_other_income
+                        + taxable_withdrawals_so_far
+                    ),
                 )
             )
 
             net = gross - tax
+            taxable_withdrawals_so_far += gross
 
         else:
 
@@ -828,6 +883,14 @@ def run_retirement_engine(
             )
         )
 
+        provisional_other_income = (
+            _social_security_other_income(
+                config,
+                year,
+                base_taxable_income,
+            )
+        )
+
         market_decline = bool(
             config.market_declines_by_year.get(
                 year,
@@ -859,6 +922,8 @@ def run_retirement_engine(
             year=year,
             base_taxable_income=base_taxable_income,
             roth_conversions=roth_conversions,
+            social_security_benefits=social_security,
+            provisional_other_income=provisional_other_income,
         )
 
         cash_need = _portfolio_cash_requirement(
@@ -883,6 +948,8 @@ def run_retirement_engine(
             conversion_amount=actual_conversion_amount,
             market_decline=market_decline,
             reserved_for_conversions=roth_conversions,
+            social_security_benefits=social_security,
+            provisional_other_income=provisional_other_income,
         )
 
         projection = project_portfolio_year(

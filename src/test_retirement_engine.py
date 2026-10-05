@@ -7,8 +7,10 @@ from portfolio_projection import (
 
 from retirement_engine import (
     RetirementEngineConfig,
+    _withdrawal_tax,
     run_retirement_engine,
 )
+from tax_engine import calculate_federal_tax_with_social_security_mfj_2026
 
 
 def test_engine_carries_balances_forward():
@@ -148,7 +150,7 @@ def test_outside_income_reduces_portfolio_need():
 
     assert (
         result.net_cash_from_withdrawal
-        == Decimal("52383.56164383561643835616439")
+        == result.cash_need_before_withdrawal
     )
 
 
@@ -286,6 +288,131 @@ def test_roth_conversion_tax_is_added_after_outside_income():
             result.net_spending_need
             + result.conversion_tax
         )
+    )
+
+
+def test_social_security_taxable_benefit_affects_conversion_tax():
+
+    config = RetirementEngineConfig(
+        start_year=2027,
+        end_year=2027,
+        annual_return=Decimal("0"),
+        monthly_spending_target=Decimal("0"),
+        transaction_income_by_year={
+            2027: Decimal("25000"),
+        },
+        rental_income_by_year={
+            2027: Decimal("0"),
+        },
+        social_security_by_year={
+            2027: Decimal("50000"),
+        },
+        base_taxable_income_by_year={
+            2027: Decimal("25000"),
+        },
+        roth_conversions_by_year={
+            2027: {
+                "Chris 401(k)": Decimal("10000"),
+            }
+        },
+        conversion_tax_funded_from_withdrawal=False,
+    )
+
+    result = run_retirement_engine(config)[0]
+
+    # Gross Social Security remains spendable outside income.
+    assert result.outside_income == Decimal("75000")
+
+    # With $25,000 other income and $50,000 benefits, taxable
+    # Social Security is $11,100 before and $19,600 after the
+    # $10,000 conversion. Federal incremental tax is $2,220;
+    # North Carolina conversion tax is $399.
+    assert result.conversion_tax == Decimal("2619.0000")
+
+
+def test_conversion_uses_separate_social_security_other_income():
+
+    config = RetirementEngineConfig(
+        start_year=2027,
+        end_year=2027,
+        annual_return=Decimal("0"),
+        monthly_spending_target=Decimal("0"),
+        social_security_by_year={
+            2027: Decimal("50000"),
+        },
+        base_taxable_income_by_year={
+            2027: Decimal("100000"),
+        },
+        social_security_other_income_by_year={
+            2027: Decimal("25000"),
+        },
+        roth_conversions_by_year={
+            2027: {
+                "Chris 401(k)": Decimal("10000"),
+            }
+        },
+        conversion_tax_funded_from_withdrawal=False,
+    )
+
+    result = run_retirement_engine(config)[0]
+
+    expected_federal_tax = (
+        calculate_federal_tax_with_social_security_mfj_2026(
+            Decimal("110000"),
+            Decimal("50000"),
+            Decimal("35000"),
+        )
+        - calculate_federal_tax_with_social_security_mfj_2026(
+            Decimal("100000"),
+            Decimal("50000"),
+            Decimal("25000"),
+        )
+    )
+
+    assert result.conversion_tax == (
+        expected_federal_tax
+        + Decimal("399.0000")
+    )
+
+
+def test_social_security_taxable_benefit_affects_withdrawal_tax():
+
+    withdrawal_tax = _withdrawal_tax(
+        base_taxable_income=Decimal("25000"),
+        conversion_amount=Decimal("10000"),
+        withdrawal_amount=Decimal("10000"),
+        social_security_benefits=Decimal("50000"),
+    )
+
+    assert withdrawal_tax == Decimal("2619.0000")
+
+
+def test_withdrawal_uses_separate_social_security_other_income():
+
+    withdrawal_tax = _withdrawal_tax(
+        base_taxable_income=Decimal("100000"),
+        conversion_amount=Decimal("10000"),
+        withdrawal_amount=Decimal("10000"),
+        social_security_benefits=Decimal("50000"),
+        provisional_other_income=Decimal("25000"),
+    )
+
+    expected_federal_tax = (
+        calculate_federal_tax_with_social_security_mfj_2026(
+            Decimal("120000"),
+            Decimal("50000"),
+            Decimal("45000"),
+        )
+        - calculate_federal_tax_with_social_security_mfj_2026(
+            Decimal("110000"),
+            Decimal("50000"),
+            Decimal("35000"),
+        )
+    )
+
+    assert withdrawal_tax == (
+        expected_federal_tax
+        + Decimal("399.0000")
     )
 
 

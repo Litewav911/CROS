@@ -461,10 +461,43 @@ def calculate_social_security_taxable_benefit_mfj(
     )
 
 
+def calculate_federal_tax_with_social_security_mfj_2026(
+    other_income: Decimal,
+    social_security_benefits: Decimal,
+    provisional_other_income: Decimal | None = None,
+) -> Decimal:
+    """Calculate federal tax including taxable Social Security."""
+
+    other_income = Decimal(
+        str(other_income)
+    )
+
+    if provisional_other_income is None:
+        provisional_other_income = other_income
+    else:
+        provisional_other_income = Decimal(
+            str(provisional_other_income)
+        )
+
+    taxable_social_security = (
+        calculate_social_security_taxable_benefit_mfj(
+            social_security_benefits,
+            provisional_other_income,
+        )
+    )
+
+    return calculate_federal_tax_mfj_2026(
+        other_income
+        + taxable_social_security
+    )
+
+
 def calculate_withdrawal_tax_mfj_2026(
     base_taxable_income: Decimal,
     conversion_amount: Decimal = Decimal("0"),
     withdrawal_amount: Decimal | None = None,
+    social_security_benefits: Decimal = Decimal("0"),
+    provisional_other_income: Decimal | None = None,
 ) -> Decimal:
     """
     Calculate the combined federal and North Carolina
@@ -518,13 +551,64 @@ def calculate_withdrawal_tax_mfj_2026(
     if withdrawal_amount == 0:
         return Decimal("0")
 
-    federal_tax = (
-        calculate_federal_incremental_tax_mfj_2026(
-            base_taxable_income
-            + conversion_amount,
-            withdrawal_amount,
+    if provisional_other_income is None:
+        provisional_other_income = base_taxable_income
+    else:
+        provisional_other_income = Decimal(
+            str(provisional_other_income)
+        )
+
+    taxable_income_before_withdrawal = (
+        base_taxable_income
+        + conversion_amount
+    )
+
+    taxable_social_security_before = (
+        calculate_social_security_taxable_benefit_mfj(
+            social_security_benefits,
+            provisional_other_income + conversion_amount,
         )
     )
+
+    taxable_social_security_after = (
+        calculate_social_security_taxable_benefit_mfj(
+            social_security_benefits,
+            provisional_other_income
+            + conversion_amount
+            + withdrawal_amount,
+        )
+    )
+
+    if (
+        taxable_social_security_before
+        == taxable_social_security_after
+    ):
+
+        federal_tax = (
+            calculate_federal_incremental_tax_mfj_2026(
+                taxable_income_before_withdrawal
+                + taxable_social_security_before,
+                withdrawal_amount,
+            )
+        )
+
+    else:
+
+        federal_tax = (
+            calculate_federal_tax_with_social_security_mfj_2026(
+                taxable_income_before_withdrawal
+                + withdrawal_amount,
+                social_security_benefits,
+                provisional_other_income
+                + conversion_amount
+                + withdrawal_amount,
+            )
+            - calculate_federal_tax_with_social_security_mfj_2026(
+                taxable_income_before_withdrawal,
+                social_security_benefits,
+                provisional_other_income + conversion_amount,
+            )
+        )
 
     nc_tax = calculate_nc_incremental_tax(
         base_taxable_income
@@ -541,6 +625,8 @@ def calculate_withdrawal_tax_mfj_2026(
 def calculate_conversion_tax_mfj_2026(
     base_taxable_income: Decimal,
     conversion_amount: Decimal,
+    social_security_benefits: Decimal = Decimal("0"),
+    provisional_other_income: Decimal | None = None,
 ) -> TaxResult:
     """
     Calculate combined federal and NC
@@ -565,12 +651,55 @@ def calculate_conversion_tax_mfj_2026(
             "Conversion amount cannot be negative."
         )
 
-    federal_tax = (
-        calculate_federal_incremental_tax_mfj_2026(
-            base_taxable_income,
-            conversion_amount,
+    if provisional_other_income is None:
+        provisional_other_income = base_taxable_income
+    else:
+        provisional_other_income = Decimal(
+            str(provisional_other_income)
+        )
+
+    taxable_social_security_before = (
+        calculate_social_security_taxable_benefit_mfj(
+            social_security_benefits,
+            provisional_other_income,
         )
     )
+
+    taxable_social_security_after = (
+        calculate_social_security_taxable_benefit_mfj(
+            social_security_benefits,
+            provisional_other_income + conversion_amount,
+        )
+    )
+
+    if (
+        taxable_social_security_before
+        == taxable_social_security_after
+    ):
+
+        federal_tax = (
+            calculate_federal_incremental_tax_mfj_2026(
+                base_taxable_income
+                + taxable_social_security_before,
+                conversion_amount,
+            )
+        )
+
+    else:
+
+        federal_tax = (
+            calculate_federal_tax_with_social_security_mfj_2026(
+                base_taxable_income
+                + conversion_amount,
+                social_security_benefits,
+                provisional_other_income + conversion_amount,
+            )
+            - calculate_federal_tax_with_social_security_mfj_2026(
+                base_taxable_income,
+                social_security_benefits,
+                provisional_other_income,
+            )
+        )
 
     nc_tax = calculate_nc_incremental_tax(
         base_taxable_income,
@@ -581,6 +710,11 @@ def calculate_conversion_tax_mfj_2026(
         taxable_income=(
             base_taxable_income
             + conversion_amount
+            + calculate_social_security_taxable_benefit_mfj(
+                social_security_benefits,
+                provisional_other_income
+                + conversion_amount,
+            )
         ),
         tax=(
             federal_tax
