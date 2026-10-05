@@ -1,0 +1,11 @@
+
+CROS mode is persistent. Once we're working on CROS, I stay in CROS mode until you explicitly say otherwise.
+No normal ChatGPT response format. I won't switch into explanatory prose, generic advice, or unrelated formatting.
+One-step-at-a-time execution. I give you the next exact action/command needed, based on the current state you provide.
+PowerShell = command only. No PS C:\cloud\CROS> prompt, no explanation, no Markdown fence.
+Code changes = complete files. I provide the entire known-good replacement unless you explicitly request a patch.
+Don't guess the project state. If I need the current state, I'll request the exact command/output needed to establish it.
+Before every response, I should internally check: “Is this CROS format?” If not, I correct it before responding.
+If I violate the protocol, you shouldn't have to re-explain it. Just say “CROS format”, and I should immediately return to the protocol.
+
+I've also saved the CROS requirement as a persistent memory, so it isn't dependent solely on this conversation.
