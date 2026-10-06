@@ -4,6 +4,7 @@ import pandas as pd
 import streamlit as st
 
 from real_retirement_scenario import run_real_retirement_scenario
+from retirement_accounts import RETIREMENT_ACCOUNTS
 from retirement_report import build_retirement_report
 from retirement_plan import PLAN
 
@@ -78,6 +79,129 @@ def _overview_rows(
         }
         for row in report
     ]
+
+
+def _account_view_data(
+    plan_assumptions: dict[str, Decimal] | None = None,
+) -> tuple[
+    list[dict[str, object]],
+    list[dict[str, object]],
+    list[dict[str, object]],
+]:
+    if plan_assumptions is None:
+        plan_assumptions = _default_plan_assumptions()
+
+    results = run_real_retirement_scenario(
+        monthly_spending_target=(
+            plan_assumptions["monthly_spending_target"]
+        ),
+        annual_return_assumption=(
+            plan_assumptions["annual_return_assumption"]
+        ),
+        annual_roth_conversion_target=(
+            plan_assumptions["annual_roth_conversion_target"]
+        ),
+    )
+    if not results:
+        return [], [], []
+
+    metadata = {
+        account.name: account
+        for account in RETIREMENT_ACCOUNTS
+    }
+    account_names = list(results[0].beginning_balances)
+    total_withdrawals = {
+        name: sum(
+            (result.withdrawal_allocations.get(name, Decimal("0"))
+             for result in results),
+            Decimal("0"),
+        )
+        for name in account_names
+    }
+    summary_rows = []
+    balance_rows = []
+    withdrawal_rows = []
+
+    for name in account_names:
+        account = metadata.get(name)
+        summary_rows.append(
+            {
+                "Account": name,
+                "Owner": account.owner if account else "—",
+                "Type": account.account_type if account else "—",
+                "Tax treatment": account.tax_treatment if account else "—",
+                "Starting balance": results[0].beginning_balances[name],
+                "Ending balance": results[-1].ending_balances[name],
+                "Total withdrawals": total_withdrawals[name],
+            }
+        )
+
+    for result in results:
+        for name, balance in result.ending_balances.items():
+            balance_rows.append(
+                {"Year": result.year, "Account": name, "Balance": balance}
+            )
+        for name, amount in result.withdrawal_allocations.items():
+            withdrawal_rows.append(
+                {"Year": result.year, "Account": name, "Withdrawal": amount}
+            )
+
+    return summary_rows, balance_rows, withdrawal_rows
+
+
+def _show_accounts() -> None:
+    summary_rows, balance_rows, withdrawal_rows = _account_view_data(
+        _current_plan_assumptions()
+    )
+
+    st.title("Accounts")
+    st.caption("Starting balances, projected balances, and modeled withdrawal sources · 2027–2040")
+
+    if not summary_rows:
+        st.info("No account projection is available.")
+        return
+
+    st.subheader("Account summary")
+    st.dataframe(
+        pd.DataFrame(summary_rows),
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            "Starting balance": st.column_config.NumberColumn(format="$%.2f"),
+            "Ending balance": st.column_config.NumberColumn(format="$%.2f"),
+            "Total withdrawals": st.column_config.NumberColumn(format="$%.2f"),
+        },
+    )
+
+    st.subheader("Projected balances by year")
+    balance_frame = pd.DataFrame(balance_rows)
+    balance_chart = balance_frame.pivot(
+        index="Year", columns="Account", values="Balance"
+    ).astype(float)
+    st.line_chart(balance_chart, y_label="Balance ($)")
+    st.dataframe(
+        balance_frame.pivot(index="Year", columns="Account", values="Balance")
+        .reset_index(),
+        hide_index=True,
+        use_container_width=True,
+        column_config={
+            name: st.column_config.NumberColumn(format="$%.2f")
+            for name in balance_frame["Account"].unique()
+        },
+    )
+
+    st.subheader("Withdrawal sources by year")
+    if withdrawal_rows:
+        st.dataframe(
+            pd.DataFrame(withdrawal_rows),
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Withdrawal": st.column_config.NumberColumn(format="$%.2f"),
+            },
+        )
+    else:
+        st.info("The current projection has no account withdrawals.")
 
 
 def _show_overview() -> None:
@@ -225,6 +349,10 @@ def main() -> None:
 
     if section == "Retirement Plan":
         _show_retirement_plan()
+        return
+
+    if section == "Accounts":
+        _show_accounts()
         return
 
     st.title(section)
