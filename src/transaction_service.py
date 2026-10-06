@@ -1,6 +1,10 @@
 import sqlite3
+from sqlalchemy import update
+from sqlalchemy.engine import Engine
 from typing import Optional
 
+from database import engine
+from models import Transaction
 
 DATABASE = "data/db/cros.db"
 
@@ -65,3 +69,22 @@ def get_effective_transaction(
         "notes":
             row["notes"],
     }
+
+
+def update_category_override(
+    transaction_id: int,
+    category_override: str | None,
+    database_engine: Engine = engine,
+) -> None:
+    """Set or clear a transaction's manual category override."""
+    if category_override is not None and not category_override.strip():
+        raise ValueError("Category cannot be empty.")
+
+    with database_engine.begin() as connection:
+        result = connection.execute(
+            update(Transaction)
+            .where(Transaction.id == transaction_id)
+            .values(category_override=category_override)
+        )
+        if result.rowcount != 1:
+            raise LookupError(f"Transaction not found: {transaction_id}")

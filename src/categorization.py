@@ -1,9 +1,11 @@
 import sqlite3
+from contextlib import closing
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
 
 
-DATABASE = "data/db/cros.db"
+DATABASE = Path(__file__).resolve().parent.parent / "data" / "db" / "cros.db"
 
 
 @dataclass
@@ -16,26 +18,47 @@ class CategoryResult:
 def categorize(
     description: str,
     amount: float,
+    database_path: Path = DATABASE,
 ) -> CategoryResult:
 
+    return categorize_with_rules(
+        description,
+        amount,
+        load_category_rules(database_path),
+    )
+
+
+def load_category_rules(
+    database_path: Path = DATABASE,
+) -> list[tuple[str, str, Optional[str], str]]:
+    if not database_path.exists():
+        return []
+
+    database_uri = f"file:{database_path.as_posix()}?mode=ro"
+    try:
+        with closing(sqlite3.connect(database_uri, uri=True)) as connection:
+            return connection.execute(
+                """
+                SELECT
+                    keyword,
+                    category,
+                    merchant,
+                    transaction_type
+                FROM category_rules
+                WHERE active = 1
+                ORDER BY priority ASC, id ASC
+                """
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+
+
+def categorize_with_rules(
+    description: str,
+    amount: float,
+    rules: list[tuple[str, str, Optional[str], str]],
+) -> CategoryResult:
     normalized = description.upper()
-
-    connection = sqlite3.connect(DATABASE)
-
-    rules = connection.execute(
-        """
-        SELECT
-            keyword,
-            category,
-            merchant,
-            transaction_type
-        FROM category_rules
-        WHERE active = 1
-        ORDER BY priority ASC, id ASC
-        """
-    ).fetchall()
-
-    connection.close()
 
     for (
         keyword,
@@ -44,7 +67,7 @@ def categorize(
         transaction_type,
     ) in rules:
 
-        if keyword.upper() in normalized:
+        if keyword and keyword.upper() in normalized:
 
             return CategoryResult(
                 category=category,

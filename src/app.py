@@ -1,15 +1,22 @@
 from contextlib import closing
 from decimal import Decimal
+import hashlib
 import sqlite3
+import tempfile
+from pathlib import Path
 
 import pandas as pd
 import streamlit as st
+from sqlalchemy.exc import SQLAlchemyError
 
 from database import DATABASE_PATH
+from categorization import categorize_with_rules, load_category_rules
+from import_csv import import_csv, parse_csv_content
 from real_retirement_scenario import run_real_retirement_scenario
 from retirement_accounts import RETIREMENT_ACCOUNTS
 from retirement_report import build_retirement_report
 from retirement_plan import PLAN
+from transaction_service import update_category_override
 
 
 SECTIONS = (
@@ -249,11 +256,13 @@ def _transaction_view_data(
             rows = connection.execute(
                 """
                 SELECT
-                    transaction_date,
-                    description,
-                    amount,
-                    COALESCE(category_override, category, 'Uncategorized'),
-                    COALESCE(merchant_override, merchant, ''),
+                    t.id,
+                    t.transaction_date,
+                    t.description,
+                    t.amount,
+                    COALESCE(t.category, 'Uncategorized'),
+                    COALESCE(t.category_override, t.category, 'Uncategorized'),
+                    COALESCE(t.merchant_override, t.merchant, ''),
                     COALESCE(account.name, '—')
                 FROM transactions AS t
                 LEFT JOIN accounts AS account
@@ -274,9 +283,11 @@ def _transaction_view_data(
     annual_income = Decimal("0")
 
     for (
+        transaction_id,
         transaction_date,
         description,
         amount,
+        base_category,
         category,
         merchant,
         account,
@@ -287,11 +298,13 @@ def _transaction_view_data(
 
         transactions.append(
             {
+                "ID": transaction_id,
                 "Date": transaction_date,
                 "Description": description or "",
                 "Merchant": merchant,
                 "Account": account,
                 "Category": category,
+                "_base_category": base_category,
                 "Amount": amount,
             }
         )
@@ -328,6 +341,217 @@ def _transaction_view_data(
     }
 
 
+def _transaction_category_options(database_path=DATABASE_PATH) -> list[str]:
+    if not database_path.exists():
+        return ["Uncategorized"]
+
+    database_uri = f"file:{database_path.as_posix()}?mode=ro"
+    try:
+        with closing(sqlite3.connect(database_uri, uri=True)) as connection:
+            rows = connection.execute(
+                """
+                SELECT category FROM transactions WHERE category IS NOT NULL
+                UNION
+                SELECT category_override FROM transactions
+                    WHERE category_override IS NOT NULL
+                UNION
+                SELECT category FROM category_rules WHERE active = 1
+                ORDER BY 1
+                """
+            ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+
+    return sorted({"Uncategorized", *(row[0] for row in rows)})
+
+
+def _importable_accounts(database_path=DATABASE_PATH) -> list[dict[str, object]]:
+    if not database_path.exists():
+        return []
+
+    database_uri = f"file:{database_path.as_posix()}?mode=ro"
+    try:
+        with closing(sqlite3.connect(database_uri, uri=True)) as connection:
+            rows = connection.execute(
+                """
+                SELECT id, name, account_type, institution, last_four
+                FROM accounts
+                WHERE is_active = 1
+                ORDER BY name
+                """
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+
+    return [
+        {
+            "id": account_id,
+            "name": name,
+            "account_type": account_type,
+            "institution": institution,
+            "last_four": last_four,
+        }
+        for account_id, name, account_type, institution, last_four in rows
+    ]
+
+
+def _preview_csv_transactions(content: bytes) -> list[dict[str, object]]:
+    rules = load_category_rules(DATABASE_PATH)
+    preview = []
+    for row in parse_csv_content(content):
+        suggestion = categorize_with_rules(
+            row["description"],
+            float(row["amount"]),
+            rules,
+        )
+        preview.append(
+            {
+                "Row": row["source_row_number"],
+                "Date": row["transaction_date"],
+                "Description": row["description"],
+                "Amount": row["amount"],
+                "Suggested category": suggestion.category,
+                "Category": suggestion.category,
+            }
+        )
+    return preview
+
+
+def _show_csv_import() -> None:
+    with st.expander("Review and import CSV transactions"):
+        st.caption(
+            "Supported columns: Date (YYYY-MM-DD), Description, Amount. "
+            "Rows are previewed and categorized before they are saved."
+        )
+        uploaded_file = st.file_uploader(
+            "Choose a statement CSV",
+            type=["csv"],
+            key="transaction_csv_upload",
+        )
+        if uploaded_file is None:
+            return
+
+        content = uploaded_file.getvalue()
+        file_digest = hashlib.sha256(content).hexdigest()
+        if st.session_state.get("imported_csv_hash") == file_digest:
+            st.success(f"Imported {uploaded_file.name} successfully.")
+            return
+
+        try:
+            preview_rows = _preview_csv_transactions(content)
+        except (UnicodeDecodeError, ValueError) as error:
+            st.error(str(error))
+            return
+
+        accounts = _importable_accounts()
+        known_categories = _transaction_category_options()
+        suggestions = {
+            str(row["Suggested category"])
+            for row in preview_rows
+        }
+        category_choices = sorted(set(known_categories) | suggestions)
+        st.write(f"Review {len(preview_rows)} rows from **{uploaded_file.name}**.")
+        reviewed = st.data_editor(
+            pd.DataFrame(preview_rows),
+            hide_index=True,
+            use_container_width=True,
+            disabled=[
+                "Row",
+                "Date",
+                "Description",
+                "Amount",
+                "Suggested category",
+            ],
+            column_config={
+                "Amount": st.column_config.NumberColumn(format="$%.2f"),
+                "Category": st.column_config.SelectboxColumn(
+                    options=category_choices,
+                    required=True,
+                ),
+            },
+            key=f"csv_review_{file_digest[:12]}",
+        )
+
+        use_existing = bool(accounts) and st.radio(
+            "Assign transactions to",
+            ("Existing account", "New account"),
+            horizontal=True,
+            key="csv_account_mode",
+        ) == "Existing account"
+        account_id = None
+        new_account = None
+        if use_existing:
+            account_by_label = {
+                (
+                    f"{account['name']} · {account['account_type']} · "
+                    f"{account['institution'] or 'Institution not recorded'}"
+                    f" · ending {account['last_four'] or '—'}"
+                ): account
+                for account in accounts
+            }
+            account_label = st.selectbox(
+                "Account",
+                list(account_by_label),
+                key="csv_existing_account",
+            )
+            account_id = account_by_label[account_label]["id"]
+        else:
+            st.caption("Create an account with its actual statement metadata.")
+            new_account = {
+                "account_name": st.text_input("Account name", key="csv_new_name"),
+                "account_type": st.selectbox(
+                    "Account type",
+                    ("checking", "savings", "credit_card", "cash"),
+                    key="csv_new_type",
+                ),
+                "institution": st.text_input(
+                    "Institution", key="csv_new_institution"
+                ),
+                "last_four": st.text_input(
+                    "Last four digits (optional)", key="csv_new_last_four"
+                ),
+            }
+
+        if st.button("Import reviewed transactions", type="primary"):
+            if use_existing:
+                account_arguments = {"account_id": account_id}
+            else:
+                account_arguments = new_account
+            category_overrides = {
+                int(row["Row"]): str(row["Category"])
+                for row in reviewed.to_dict("records")
+                if str(row["Category"]) != str(row["Suggested category"])
+            }
+
+            temporary_path = None
+            try:
+                with tempfile.NamedTemporaryFile(
+                    prefix="cros-import-",
+                    suffix=".csv",
+                    dir=DATABASE_PATH.parent,
+                    delete=False,
+                ) as temporary_file:
+                    temporary_file.write(content)
+                    temporary_path = Path(temporary_file.name)
+
+                imported_count = import_csv(
+                    temporary_path,
+                    **account_arguments,
+                    source_filename=Path(uploaded_file.name).name,
+                    category_overrides=category_overrides,
+                )
+            except (OSError, ValueError, SQLAlchemyError) as error:
+                st.error(str(error))
+                return
+            finally:
+                if temporary_path is not None:
+                    temporary_path.unlink(missing_ok=True)
+
+            st.session_state["imported_csv_hash"] = file_digest
+            st.success(f"Imported {imported_count} reviewed transactions.")
+            st.rerun()
+
+
 def _show_transactions_spending() -> None:
     st.title("Transactions & spending")
     st.caption("Review recorded transactions and compare actual spending with plan targets.")
@@ -340,6 +564,7 @@ def _show_transactions_spending() -> None:
     years = _available_transaction_years()
     if not years:
         st.info("No dated transactions are available in the local database.")
+        _show_csv_import()
         return
 
     selected_year = st.selectbox("Year", years, index=len(years) - 1)
@@ -387,16 +612,77 @@ def _show_transactions_spending() -> None:
 
     st.subheader("Transactions for selected month")
     if data["transactions"]:
-        st.dataframe(
-            pd.DataFrame(data["transactions"]),
+        transaction_frame = pd.DataFrame(data["transactions"])
+        visible_columns = [
+            "ID",
+            "Date",
+            "Description",
+            "Merchant",
+            "Account",
+            "Category",
+            "Amount",
+        ]
+        known_categories = _transaction_category_options()
+        category_choices = sorted(
+            set(known_categories)
+            | set(transaction_frame["Category"].astype(str))
+            | set(transaction_frame["_base_category"].astype(str))
+        )
+        edited_frame = st.data_editor(
+            transaction_frame[visible_columns],
             hide_index=True,
             use_container_width=True,
+            disabled=[
+                "ID",
+                "Date",
+                "Description",
+                "Merchant",
+                "Account",
+                "Amount",
+            ],
             column_config={
                 "Amount": st.column_config.NumberColumn(format="$%.2f"),
+                "Category": st.column_config.SelectboxColumn(
+                    options=category_choices,
+                    required=True,
+                ),
             },
+            key=f"transaction_categories_{selected_year}_{selected_month}",
         )
+        if st.button("Save category corrections"):
+            original_by_id = {
+                row["ID"]: row for row in data["transactions"]
+            }
+            updated_count = 0
+            for edited_row in edited_frame.to_dict("records"):
+                original = original_by_id[edited_row["ID"]]
+                selected_category = str(edited_row["Category"])
+                if selected_category == original["Category"]:
+                    continue
+                category_override = (
+                    None
+                    if selected_category == original["_base_category"]
+                    else selected_category
+                )
+                update_category_override(
+                    edited_row["ID"],
+                    category_override,
+                )
+                updated_count += 1
+            st.session_state[
+                f"saved_transaction_categories_{selected_year}_{selected_month}"
+            ] = updated_count
+            st.rerun()
+
+        saved_count = st.session_state.get(
+            f"saved_transaction_categories_{selected_year}_{selected_month}"
+        )
+        if saved_count is not None:
+            st.success(f"Saved category corrections for {saved_count} transactions.")
     else:
         st.info("No transactions were recorded for this month.")
+
+    _show_csv_import()
 
 
 def _show_overview() -> None:

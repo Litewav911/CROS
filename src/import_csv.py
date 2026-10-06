@@ -2,14 +2,17 @@ import csv
 import hashlib
 import json
 from datetime import datetime
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from sqlalchemy import select
+from sqlalchemy.engine import Engine
 
+from categorization import categorize_with_rules
 from database import engine
 from models import (
     Account,
+    CategoryRule,
     SourceDocument,
     SourceTransaction,
     Transaction,
@@ -40,51 +43,109 @@ def read_csv_rows_with_raw_text(file_path: Path):
     through its SHA-256 hash and source document record.
     """
 
-    with file_path.open(
-        "r",
-        encoding="utf-8-sig",
-        newline="",
-    ) as file:
+    content = file_path.read_bytes()
 
-        lines = file.readlines()
-
-    if not lines:
-        return
-
-    header = lines[0]
-
-    reader = csv.DictReader(
-        lines
-    )
-
-    physical_line_number = 1
-
-    for row in reader:
-
-        # csv.reader/DictReader may consume more than one
-        # physical line when a CSV field contains a newline.
-        # For our initial importer, locate the next complete
-        # physical record using the parser's line number.
-        end_line_number = reader.line_num
-
-        raw_lines = lines[
-            physical_line_number:end_line_number
-        ]
-
-        raw_row_text = "".join(raw_lines)
-
+    for row in parse_csv_content(content):
         yield (
-            row,
-            physical_line_number + 1,
-            raw_row_text,
+            json.loads(row["original_data"]),
+            row["source_row_number"],
+            row["raw_row_text"],
         )
 
-        physical_line_number = end_line_number
+
+def parse_csv_content(content: bytes) -> list[dict[str, object]]:
+    """Validate and normalize a CSV using the supported statement columns."""
+    try:
+        text = content.decode("utf-8-sig")
+    except UnicodeDecodeError as error:
+        raise ValueError("CSV must be encoded as UTF-8.") from error
+
+    if not text.strip():
+        raise ValueError("CSV file is empty.")
+
+    lines = text.splitlines(keepends=True)
+    reader = csv.DictReader(lines)
+    required_columns = {"Date", "Description", "Amount"}
+    if reader.fieldnames and len(set(reader.fieldnames)) != len(reader.fieldnames):
+        raise ValueError("CSV column names must be unique.")
+    if not reader.fieldnames or not required_columns.issubset(reader.fieldnames):
+        raise ValueError(
+            "CSV must include the columns Date, Description, and Amount."
+        )
+
+    parsed_rows = []
+    previous_line_number = 1
+    for row in reader:
+        line_number = reader.line_num
+        raw_row_text = "".join(lines[previous_line_number:line_number])
+        previous_line_number = line_number
+
+        if not row or all(value in (None, "") for value in row.values()):
+            continue
+        if None in row:
+            raise ValueError(
+                f"CSV row {line_number}: Row has more values than the header."
+            )
+
+        try:
+            transaction_date = datetime.strptime(
+                (row.get("Date") or "").strip(),
+                "%Y-%m-%d",
+            ).date()
+        except ValueError as error:
+            raise ValueError(
+                f"CSV row {line_number}: Date must use YYYY-MM-DD."
+            ) from error
+
+        description = (row.get("Description") or "").strip()
+        if not description:
+            raise ValueError(
+                f"CSV row {line_number}: Description cannot be empty."
+            )
+
+        try:
+            amount = Decimal((row.get("Amount") or "").strip())
+        except InvalidOperation as error:
+            raise ValueError(
+                f"CSV row {line_number}: Amount must be a valid number."
+            ) from error
+        if not amount.is_finite():
+            raise ValueError(
+                f"CSV row {line_number}: Amount must be finite."
+            )
+
+        original_data = json.dumps(
+            row,
+            ensure_ascii=False,
+            separators=(",", ":"),
+        )
+        parsed_rows.append(
+            {
+                "source_row_number": line_number,
+                "transaction_date": transaction_date,
+                "description": description,
+                "amount": amount,
+                "raw_row_text": raw_row_text,
+                "original_data": original_data,
+            }
+        )
+
+    if not parsed_rows:
+        raise ValueError("CSV contains no transaction rows.")
+
+    return parsed_rows
 
 
 def import_csv(
-    file_path: str,
-    account_name: str = "Test Checking",
+    file_path: str | Path,
+    account_id: int | None = None,
+    account_name: str | None = None,
+    account_type: str | None = None,
+    institution: str | None = None,
+    last_four: str | None = None,
+    source_filename: str | None = None,
+    category_overrides: dict[int, str] | None = None,
+    database_engine: Engine = engine,
 ) -> int:
     """Import a CSV statement while preserving source data."""
 
@@ -95,9 +156,22 @@ def import_csv(
             f"File not found: {file_path}"
         )
 
+    if account_id is None:
+        if not account_name or not account_name.strip():
+            raise ValueError("Account name is required for a new account.")
+        if not account_type or not account_type.strip():
+            raise ValueError("Account type is required for a new account.")
+        if not institution or not institution.strip():
+            raise ValueError("Institution is required for a new account.")
+        if last_four and (
+            len(last_four) != 4 or not last_four.isdigit()
+        ):
+            raise ValueError("Last four must contain exactly four digits.")
+
+    parsed_rows = parse_csv_content(file_path.read_bytes())
     file_hash = calculate_file_hash(file_path)
 
-    with engine.begin() as connection:
+    with database_engine.begin() as connection:
 
         # Prevent importing the exact same file twice.
         existing_document = connection.execute(
@@ -119,8 +193,8 @@ def import_csv(
         connection.execute(
             SourceDocument.__table__.insert(),
             {
-                "filename": file_path.name,
-                "file_type": file_path.suffix.lower(),
+                "filename": source_filename or file_path.name,
+                "file_type": Path(source_filename or file_path.name).suffix.lower(),
                 "file_hash": file_hash,
                 "imported_at": datetime.now(),
             },
@@ -132,57 +206,62 @@ def import_csv(
             )
         ).scalar_one()
 
-        # Find or create the account.
-        account = connection.execute(
-            select(
-                Account.id,
-                Account.name,
-            ).where(
-                Account.name == account_name
-            )
-        ).first()
-
-        if account is None:
-
+        if account_id is not None:
+            account = connection.execute(
+                select(Account.id).where(
+                    Account.id == account_id,
+                    Account.is_active.is_(True),
+                )
+            ).first()
+            if account is None:
+                raise ValueError("Selected account does not exist or is inactive.")
+            resolved_account_id = account.id
+        else:
+            duplicate_account = connection.execute(
+                select(Account.id).where(Account.name == account_name.strip())
+            ).first()
+            if duplicate_account:
+                raise ValueError(
+                    "An account with that name already exists. Select it instead."
+                )
             connection.execute(
                 Account.__table__.insert(),
                 {
-                    "name": account_name,
-                    "account_type": "checking",
-                    "institution": "Test Institution",
+                    "name": account_name.strip(),
+                    "account_type": account_type.strip(),
+                    "institution": institution.strip(),
+                    "last_four": last_four or None,
                     "is_active": True,
                 },
             )
 
-            account_id = connection.execute(
-                select(Account.id).where(
-                    Account.name == account_name
-                )
+            resolved_account_id = connection.execute(
+                select(Account.id).where(Account.name == account_name.strip())
             ).scalar_one()
 
-        else:
-            account_id = account.id
-
+        category_rules = connection.execute(
+            select(
+                CategoryRule.keyword,
+                CategoryRule.category,
+                CategoryRule.merchant,
+                CategoryRule.transaction_type,
+            )
+            .where(CategoryRule.active.is_(True))
+            .order_by(CategoryRule.priority.asc(), CategoryRule.id.asc())
+        ).all()
+        category_overrides = category_overrides or {}
         imported_count = 0
 
-        for (
-            row,
-            row_number,
-            raw_row_text,
-        ) in read_csv_rows_with_raw_text(file_path):
-
-            original_data = json.dumps(
-                row,
-                ensure_ascii=False,
-                separators=(",", ":"),
+        for row in parsed_rows:
+            row_number = row["source_row_number"]
+            transaction_date = row["transaction_date"]
+            description = row["description"]
+            amount = row["amount"]
+            category_result = categorize_with_rules(
+                description,
+                float(amount),
+                category_rules,
             )
-
-            transaction_date = datetime.strptime(
-                row["Date"],
-                "%Y-%m-%d",
-            ).date()
-
-            amount = Decimal(row["Amount"])
 
             # Preserve the original source transaction.
             connection.execute(
@@ -191,10 +270,10 @@ def import_csv(
                     "source_document_id": source_document_id,
                     "source_row_number": row_number,
                     "transaction_date": transaction_date,
-                    "original_description": row["Description"],
+                    "original_description": description,
                     "original_amount": amount,
-                    "raw_row_text": raw_row_text,
-                    "original_data": original_data,
+                    "raw_row_text": row["raw_row_text"],
+                    "original_data": row["original_data"],
                     "imported_at": datetime.now(),
                 },
             )
@@ -217,13 +296,15 @@ def import_csv(
                 {
                     "source_transaction_id":
                         source_transaction_id,
-                    "account_id": account_id,
+                    "account_id": resolved_account_id,
                     "transaction_date":
                         transaction_date,
-                    "description":
-                        row["Description"],
+                    "description": description,
                     "amount":
                         amount,
+                    "category": category_result.category,
+                    "category_override": category_overrides.get(row_number),
+                    "merchant": category_result.merchant,
                 },
             )
 
@@ -243,7 +324,12 @@ if __name__ == "__main__":
 
     try:
 
-        count = import_csv(test_file)
+        count = import_csv(
+            test_file,
+            account_name="Test Checking",
+            account_type="checking",
+            institution="Test Institution",
+        )
 
         print(
             f"Successfully imported "
