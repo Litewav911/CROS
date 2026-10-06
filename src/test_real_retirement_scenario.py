@@ -7,6 +7,7 @@ from real_retirement_scenario import (
 )
 from retirement_plan import PLAN
 from retirement_plan import build_social_security_benefit_schedule
+from rental_cashflow import monthly_rental_cashflow
 
 
 CENT = Decimal("0.01")
@@ -36,9 +37,13 @@ def test_real_retirement_scenario_produces_fourteen_years():
 def test_real_retirement_config_supplies_provisional_income_schedule():
 
     config = build_real_retirement_config()
+    annual_rental_cashflow = (
+        monthly_rental_cashflow()["net_rental_cashflow"]
+        * Decimal("12")
+    )
 
     assert config.social_security_other_income_by_year == {
-        year: PLAN.annual_base_taxable_income
+        year: annual_rental_cashflow
         for year in range(
             PLAN.retirement_start.year,
             PLAN.retirement_end_year + 1,
@@ -68,7 +73,7 @@ def test_real_retirement_config_accepts_plan_assumption_overrides():
         for year in range(2027, 2041)
     }
     assert config.base_taxable_income_by_year == {
-        year: PLAN.annual_base_taxable_income
+        year: Decimal("34636.09")
         for year in range(2027, 2041)
     }
     assert config.social_security_by_year == {
@@ -89,27 +94,7 @@ def test_real_retirement_scenario_applies_plan_assumption_overrides():
     assert results[0].conversion_amount == Decimal("50000")
 
 
-def test_real_retirement_config_uses_calculated_social_security_schedule(
-    monkeypatch,
-):
-
-    monkeypatch.setattr(
-        PLAN,
-        "non_social_security_taxable_income_by_year",
-        {
-            2027: Decimal("84000"),
-            2029: Decimal("96000"),
-        },
-    )
-    monkeypatch.setattr(
-        PLAN,
-        "tax_exempt_interest_by_year",
-        {
-            2027: Decimal("1200"),
-            2028: Decimal("1500"),
-        },
-    )
-
+def test_real_retirement_config_uses_calculated_social_security_schedule():
     benefits = build_social_security_benefit_schedule(
         claimant_inputs={
             "Chris": {
@@ -125,15 +110,10 @@ def test_real_retirement_config_uses_calculated_social_security_schedule(
     assert config.social_security_by_year[2027] == Decimal("24000")
     assert config.social_security_by_year[2028] == Decimal("24480.00")
     assert config.social_security_by_year[2029] == Decimal("24969.6000")
-    assert config.social_security_other_income_by_year[2027] == (
-        Decimal("84000") + Decimal("1200")
-    )
-    assert config.social_security_other_income_by_year[2028] == (
-        PLAN.annual_base_taxable_income + Decimal("1500")
-    )
-    assert config.social_security_other_income_by_year[2029] == (
-        Decimal("96000")
-    )
+    assert config.social_security_other_income_by_year == {
+        year: Decimal("34636.09")
+        for year in range(2027, 2041)
+    }
 
 
 def test_social_security_schedule_starts_at_claiming_year_and_applies_cola():
@@ -248,7 +228,7 @@ def test_real_retirement_scenario_ending_portfolio_matches_baseline():
 
     assert (
         money(final_result.ending_total)
-        == Decimal("178851.88")
+        == Decimal("284465.52")
     )
 
 
@@ -272,7 +252,7 @@ def test_real_retirement_scenario_ends_with_expected_account_balances():
 
     assert money(
         final_balances["Roth IRA"]
-    ) == Decimal("136354.62")
+    ) == Decimal("241968.27")
 
     assert money(
         final_balances["HSA"]

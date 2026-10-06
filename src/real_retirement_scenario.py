@@ -383,8 +383,8 @@ def print_real_retirement_scenario(
     )
 
     print(
-        f"Base taxable income assumption: "
-        f"{_money(PLAN.annual_base_taxable_income)}"
+        "Modeled ordinary income (net rental cash flow): "
+        f"{_money(build_base_taxable_income_schedule()[START_YEAR])}"
     )
 
     print(

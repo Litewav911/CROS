@@ -1,6 +1,8 @@
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from decimal import Decimal
 from datetime import date
+
+from rental_cashflow import monthly_rental_cashflow
 
 
 @dataclass
@@ -27,17 +29,7 @@ class RetirementPlan:
 
     annual_roth_conversion_target: Decimal
 
-    annual_base_taxable_income: Decimal
-
     annual_return_assumption: Decimal
-
-    non_social_security_taxable_income_by_year: dict[
-        int, Decimal
-    ] = field(default_factory=dict)
-
-    tax_exempt_interest_by_year: dict[int, Decimal] = field(
-        default_factory=dict
-    )
 
 
 PLAN = RetirementPlan(
@@ -69,15 +61,6 @@ PLAN = RetirementPlan(
     # requested amount.
     annual_roth_conversion_target=Decimal(
         "80000"
-    ),
-
-    # Real-scenario taxable-income assumption.
-    #
-    # This is intentionally an explicit planning input so that
-    # the tax engine can later replace it with actual projected
-    # taxable income.
-    annual_base_taxable_income=Decimal(
-        "100000"
     ),
 
     # Real-scenario investment-return assumption.
@@ -145,11 +128,11 @@ def build_base_taxable_income_schedule(
     end_year: int | None = None,
 ) -> dict[int, Decimal]:
     """
-    Build the base taxable-income schedule used by the real
-    retirement scenario.
+    Build the modeled ordinary-income schedule from rental cash flow.
 
-    This remains a planning assumption until the production tax
-    engine replaces it with dynamically calculated taxable income.
+    Net rental cash flow estimates rental taxable income until the
+    model includes depreciation and other rental tax adjustments.
+    Transaction inflows are intentionally excluded.
     """
 
     if start_year is None:
@@ -163,12 +146,13 @@ def build_base_taxable_income_schedule(
             "start_year cannot be greater than end_year."
         )
 
+    annual_rental_income = (
+        monthly_rental_cashflow()["net_rental_cashflow"]
+        * Decimal("12")
+    )
     return {
-        year: PLAN.annual_base_taxable_income
-        for year in range(
-            start_year,
-            end_year + 1,
-        )
+        year: annual_rental_income
+        for year in range(start_year, end_year + 1)
     }
 
 
@@ -178,9 +162,9 @@ def build_social_security_other_income_schedule(
 ) -> dict[int, Decimal]:
     """Build the non-Social-Security income used for provisional income.
 
-    Use the annual non-Social-Security income input when provided.
-    Otherwise retain the existing base taxable-income assumption
-    as a proxy. Add tax-exempt interest for each year.
+    Use modeled rental income and the confirmed zero tax-exempt
+    interest assumption. Tax-deferred withdrawals and conversions are
+    added by the retirement engine for provisional-income calculations.
     """
 
     base_income = build_base_taxable_income_schedule(
@@ -188,17 +172,7 @@ def build_social_security_other_income_schedule(
         end_year=end_year,
     )
 
-    return {
-        year: PLAN.non_social_security_taxable_income_by_year.get(
-            year,
-            base_income[year],
-        )
-        + PLAN.tax_exempt_interest_by_year.get(
-            year,
-            Decimal("0"),
-        )
-        for year in base_income
-    }
+    return dict(base_income)
 
 
 def build_social_security_benefit_schedule(
@@ -299,11 +273,6 @@ def print_plan():
     print(
         f"Annual Roth conversion target: "
         f"${PLAN.annual_roth_conversion_target:,.2f}"
-    )
-
-    print(
-        f"Base taxable income assumption: "
-        f"${PLAN.annual_base_taxable_income:,.2f}"
     )
 
     print(

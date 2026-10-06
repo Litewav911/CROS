@@ -737,9 +737,10 @@ def _show_overview() -> None:
     st.caption("CROS projection · 2027–2040")
 
     st.warning(
-        "This projection still uses the temporary $100,000 taxable-income "
-        "proxy. Social Security benefits come from the claimant inputs in "
-        "the Social Security section."
+        "Tax estimates use modeled net rental cash flow as ordinary income. "
+        "Rental depreciation and other tax adjustments, employment income, "
+        "and taxable investment income are not modeled yet. Social Security "
+        "benefits come from the Social Security claimant inputs."
     )
 
     metrics = st.columns(4)
