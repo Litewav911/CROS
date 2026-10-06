@@ -35,10 +35,6 @@ class RetirementPlan:
         int, Decimal
     ] = field(default_factory=dict)
 
-    social_security_benefits_by_year: dict[int, Decimal] = field(
-        default_factory=dict
-    )
-
     tax_exempt_interest_by_year: dict[int, Decimal] = field(
         default_factory=dict
     )
@@ -208,8 +204,14 @@ def build_social_security_other_income_schedule(
 def build_social_security_benefit_schedule(
     start_year: int | None = None,
     end_year: int | None = None,
+    claimant_inputs: dict[str, dict[str, Decimal | int]] | None = None,
 ) -> dict[int, Decimal]:
-    """Build annual Social Security benefit assumptions."""
+    """Build annual benefits from claimant estimates and claiming inputs.
+
+    Each claimant provides a birth year, claiming age, monthly benefit
+    estimated by SSA for that claiming age, and assumed annual COLA.
+    The first modeled benefit year is the birth year plus claiming age.
+    """
 
     if start_year is None:
         start_year = PLAN.retirement_start.year
@@ -228,13 +230,31 @@ def build_social_security_benefit_schedule(
             for year in range(start_year, end_year + 1)
         }
 
-    return {
-        year: PLAN.social_security_benefits_by_year.get(
-            year,
-            Decimal("0"),
-        )
-        for year in range(start_year, end_year + 1)
+    annual_benefits = {
+        year: Decimal("0") for year in range(start_year, end_year + 1)
     }
+    for claimant in (claimant_inputs or {}).values():
+        birth_year = int(claimant["birth_year"])
+        claiming_age = int(claimant["claiming_age"])
+        monthly_benefit = Decimal(str(claimant["monthly_benefit"]))
+        annual_cola = Decimal(str(claimant["annual_cola"]))
+        if not 62 <= claiming_age <= 70:
+            raise ValueError("Claiming age must be between 62 and 70.")
+        if monthly_benefit < 0:
+            raise ValueError("Monthly Social Security benefit cannot be negative.")
+        if annual_cola < Decimal("-1"):
+            raise ValueError("Annual COLA cannot be less than -100%.")
+
+        first_benefit_year = birth_year + claiming_age
+        modeled_start_year = max(start_year, first_benefit_year)
+        monthly_amount = monthly_benefit * (
+            Decimal("1") + annual_cola
+        ) ** max(0, modeled_start_year - first_benefit_year)
+        for year in range(modeled_start_year, end_year + 1):
+            annual_benefits[year] += monthly_amount * Decimal("12")
+            monthly_amount *= Decimal("1") + annual_cola
+
+    return annual_benefits
 
 
 def print_plan():

@@ -42,7 +42,7 @@ CROS will use a local dashboard interface. Its main sections will be:
 - Social Security
 - Taxes & Roth Conversions
 
-The Overview will show annual spending, account balances, projected withdrawals, taxes, and the year-by-year retirement plan. Users will edit assumptions in the relevant sections and view the updated projection. `src/app.py` provides the local Streamlit dashboard, a working Overview, Retirement Plan controls for monthly spending, annual return, and Roth conversion target, an Accounts view with starting balances, projected balances, and withdrawals by source, and a Transactions & Spending view with month/year summaries, transaction detail, reviewed CSV import, and category correction. Social Security and Taxes & Roth Conversions remain to be built.
+The Overview will show annual spending, account balances, projected withdrawals, taxes, and the year-by-year retirement plan. Users will edit assumptions in the relevant sections and view the updated projection. `src/app.py` provides the local Streamlit dashboard, a working Overview, Retirement Plan controls for monthly spending, annual return, and Roth conversion target, an Accounts view with starting balances, projected balances, and withdrawals by source, a Transactions & Spending view with month/year summaries, transaction detail, reviewed CSV import, and category correction, and a Social Security section that calculates an annual benefit schedule from claimant inputs. Taxes & Roth Conversions remains to be built.
 
 ## Start the Local Dashboard
 

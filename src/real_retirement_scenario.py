@@ -37,6 +37,7 @@ def build_real_retirement_config(
     monthly_spending_target: Decimal | None = None,
     annual_return_assumption: Decimal | None = None,
     annual_roth_conversion_target: Decimal | None = None,
+    social_security_by_year: dict[int, Decimal] | None = None,
 ) -> RetirementEngineConfig:
     """
     Build the current real-plan configuration.
@@ -69,9 +70,10 @@ def build_real_retirement_config(
         prorate_first_retirement_year=True,
         initial_balances=STARTING_BALANCES.copy(),
         social_security_by_year=(
-            build_social_security_benefit_schedule(
-                start_year=START_YEAR,
-                end_year=END_YEAR,
+            social_security_by_year
+            if social_security_by_year is not None
+            else build_social_security_benefit_schedule(
+                start_year=START_YEAR, end_year=END_YEAR
             )
         ),
         base_taxable_income_by_year=(
@@ -103,6 +105,7 @@ def run_real_retirement_scenario(
     monthly_spending_target: Decimal | None = None,
     annual_return_assumption: Decimal | None = None,
     annual_roth_conversion_target: Decimal | None = None,
+    social_security_by_year: dict[int, Decimal] | None = None,
 ) -> list[RetirementYearResult]:
     """
     Run the current real 2027-2040 retirement scenario.
@@ -112,6 +115,7 @@ def run_real_retirement_scenario(
         monthly_spending_target=monthly_spending_target,
         annual_return_assumption=annual_return_assumption,
         annual_roth_conversion_target=annual_roth_conversion_target,
+        social_security_by_year=social_security_by_year,
     )
 
     return run_retirement_engine(

@@ -15,7 +15,7 @@ from import_csv import import_csv, parse_csv_content
 from real_retirement_scenario import run_real_retirement_scenario
 from retirement_accounts import RETIREMENT_ACCOUNTS
 from retirement_report import build_retirement_report
-from retirement_plan import PLAN
+from retirement_plan import PLAN, build_social_security_benefit_schedule
 from transaction_service import update_category_override
 
 
@@ -50,6 +50,37 @@ def _current_plan_assumptions() -> dict[str, Decimal]:
     )
 
 
+def _current_social_security_inputs() -> dict[str, dict[str, object]]:
+    return st.session_state.get(
+        "social_security_inputs",
+        {
+            name: {
+                "enabled": False,
+                "birth_year": None,
+                "claiming_age": 67,
+                "monthly_benefit": Decimal("0"),
+                "annual_cola": Decimal("0"),
+            }
+            for name in ("Chris", "Stephanie")
+        },
+    )
+
+
+def _current_social_security_schedule() -> dict[int, Decimal]:
+    inputs = {
+        name: {
+            key: value
+            for key, value in claimant.items()
+            if key != "enabled"
+        }
+        for name, claimant in _current_social_security_inputs().items()
+        if claimant["enabled"] and claimant["birth_year"] is not None
+    }
+    return build_social_security_benefit_schedule(
+        claimant_inputs=inputs
+    )
+
+
 def _overview_rows(
     plan_assumptions: dict[str, Decimal] | None = None,
 ) -> list[dict[str, object]]:
@@ -66,6 +97,7 @@ def _overview_rows(
         annual_roth_conversion_target=(
             plan_assumptions["annual_roth_conversion_target"]
         ),
+        social_security_by_year=_current_social_security_schedule(),
     )
     report = build_retirement_report(results)
 
@@ -111,6 +143,7 @@ def _account_view_data(
         annual_roth_conversion_target=(
             plan_assumptions["annual_roth_conversion_target"]
         ),
+        social_security_by_year=_current_social_security_schedule(),
     )
     if not results:
         return [], [], []
@@ -704,10 +737,9 @@ def _show_overview() -> None:
     st.caption("CROS projection · 2027–2040")
 
     st.warning(
-        "This projection still uses temporary income assumptions, "
-        "including the $100,000 taxable-income proxy and zero Social "
-        "Security benefits. These will be replaced as the income and "
-        "Social Security models are built."
+        "This projection still uses the temporary $100,000 taxable-income "
+        "proxy. Social Security benefits come from the claimant inputs in "
+        "the Social Security section."
     )
 
     metrics = st.columns(4)
@@ -814,6 +846,89 @@ def _show_retirement_plan() -> None:
         )
 
 
+def _show_social_security() -> None:
+    st.title("Social Security")
+    st.caption("Enter each person’s SSA estimate for the selected claiming age.")
+    st.info(
+        "CROS uses the monthly estimate you provide, starts it in the year "
+        "you reach the selected age, and applies the assumed annual COLA. "
+        "The claiming year is modeled as a full calendar year. "
+        "It does not estimate your earnings record or adjust an FRA estimate "
+        "for an early or delayed claim. Imported transaction inflows are not "
+        "used as retirement income."
+    )
+
+    current_inputs = _current_social_security_inputs()
+    with st.form("social_security_inputs"):
+        submitted_inputs = {}
+        for name in ("Chris", "Stephanie"):
+            current = current_inputs[name]
+            st.subheader(name)
+            enabled = st.checkbox(
+                f"Include {name}'s retirement benefit",
+                value=bool(current["enabled"]),
+                key=f"ss_enabled_{name}",
+            )
+            columns = st.columns(4)
+            birth_year = columns[0].number_input(
+                "Birth year",
+                min_value=1900,
+                max_value=2026,
+                value=current["birth_year"],
+                step=1,
+                key=f"ss_birth_year_{name}",
+            )
+            claiming_age = columns[1].selectbox(
+                "Claiming age",
+                range(62, 71),
+                index=int(current["claiming_age"]) - 62,
+                key=f"ss_claiming_age_{name}",
+            )
+            monthly_benefit = columns[2].number_input(
+                "Estimated monthly benefit ($)",
+                min_value=0.0,
+                value=float(current["monthly_benefit"]),
+                step=50.0,
+                key=f"ss_monthly_benefit_{name}",
+            )
+            annual_cola = columns[3].number_input(
+                "Annual COLA assumption (%)",
+                min_value=-100.0,
+                value=float(current["annual_cola"] * 100),
+                step=0.25,
+                key=f"ss_cola_{name}",
+            )
+            submitted_inputs[name] = {
+                "enabled": enabled,
+                "birth_year": birth_year if enabled else None,
+                "claiming_age": claiming_age,
+                "monthly_benefit": Decimal(str(monthly_benefit)),
+                "annual_cola": Decimal(str(annual_cola)) / Decimal("100"),
+            }
+        submitted = st.form_submit_button("Apply Social Security assumptions")
+
+    if submitted:
+        st.session_state["social_security_inputs"] = submitted_inputs
+        st.success("Social Security assumptions applied to the projection.")
+
+    schedule = _current_social_security_schedule()
+    if any(schedule.values()):
+        st.subheader("Projected annual household benefits")
+        st.dataframe(
+            pd.DataFrame(
+                [
+                    {"Year": year, "Estimated benefits": amount}
+                    for year, amount in schedule.items()
+                ]
+            ),
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Estimated benefits": st.column_config.NumberColumn(
+                    format="$%.2f"
+                )
+            },
+        )
 def main() -> None:
     st.set_page_config(
         page_title="CROS Retirement Dashboard",
@@ -830,6 +945,10 @@ def main() -> None:
 
     if section == "Retirement Plan":
         _show_retirement_plan()
+        return
+
+    if section == "Social Security":
+        _show_social_security()
         return
 
     if section == "Accounts":

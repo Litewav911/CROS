@@ -6,6 +6,7 @@ from real_retirement_scenario import (
     run_real_retirement_scenario,
 )
 from retirement_plan import PLAN
+from retirement_plan import build_social_security_benefit_schedule
 
 
 CENT = Decimal("0.01")
@@ -88,7 +89,7 @@ def test_real_retirement_scenario_applies_plan_assumption_overrides():
     assert results[0].conversion_amount == Decimal("50000")
 
 
-def test_real_retirement_config_uses_annual_social_security_inputs(
+def test_real_retirement_config_uses_calculated_social_security_schedule(
     monkeypatch,
 ):
 
@@ -102,14 +103,6 @@ def test_real_retirement_config_uses_annual_social_security_inputs(
     )
     monkeypatch.setattr(
         PLAN,
-        "social_security_benefits_by_year",
-        {
-            2027: Decimal("24000"),
-            2029: Decimal("26000"),
-        },
-    )
-    monkeypatch.setattr(
-        PLAN,
         "tax_exempt_interest_by_year",
         {
             2027: Decimal("1200"),
@@ -117,11 +110,21 @@ def test_real_retirement_config_uses_annual_social_security_inputs(
         },
     )
 
-    config = build_real_retirement_config()
+    benefits = build_social_security_benefit_schedule(
+        claimant_inputs={
+            "Chris": {
+                "birth_year": 1960,
+                "claiming_age": 67,
+                "monthly_benefit": Decimal("2000"),
+                "annual_cola": Decimal("0.02"),
+            }
+        }
+    )
+    config = build_real_retirement_config(social_security_by_year=benefits)
 
     assert config.social_security_by_year[2027] == Decimal("24000")
-    assert config.social_security_by_year[2028] == Decimal("0")
-    assert config.social_security_by_year[2029] == Decimal("26000")
+    assert config.social_security_by_year[2028] == Decimal("24480.00")
+    assert config.social_security_by_year[2029] == Decimal("24969.6000")
     assert config.social_security_other_income_by_year[2027] == (
         Decimal("84000") + Decimal("1200")
     )
@@ -131,6 +134,34 @@ def test_real_retirement_config_uses_annual_social_security_inputs(
     assert config.social_security_other_income_by_year[2029] == (
         Decimal("96000")
     )
+
+
+def test_social_security_schedule_starts_at_claiming_year_and_applies_cola():
+    schedule = build_social_security_benefit_schedule(
+        start_year=2027,
+        end_year=2030,
+        claimant_inputs={
+            "Chris": {
+                "birth_year": 1960,
+                "claiming_age": 67,
+                "monthly_benefit": Decimal("2500"),
+                "annual_cola": Decimal("0.03"),
+            },
+            "Stephanie": {
+                "birth_year": 1961,
+                "claiming_age": 67,
+                "monthly_benefit": Decimal("1800"),
+                "annual_cola": Decimal("0"),
+            },
+        },
+    )
+
+    assert schedule == {
+        2027: Decimal("30000"),
+        2028: Decimal("52500.00"),
+        2029: Decimal("53427.0000"),
+        2030: Decimal("54381.810000"),
+    }
 
 
 def test_real_retirement_scenario_uses_partial_first_year():
