@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from decimal import Decimal
 from datetime import date
 
@@ -30,6 +30,14 @@ class RetirementPlan:
     annual_base_taxable_income: Decimal
 
     annual_return_assumption: Decimal
+
+    social_security_benefits_by_year: dict[int, Decimal] = field(
+        default_factory=dict
+    )
+
+    tax_exempt_interest_by_year: dict[int, Decimal] = field(
+        default_factory=dict
+    )
 
 
 PLAN = RetirementPlan(
@@ -168,10 +176,51 @@ def build_social_security_other_income_schedule(
     assumption explicitly until those inputs are available.
     """
 
-    return build_base_taxable_income_schedule(
+    base_income = build_base_taxable_income_schedule(
         start_year=start_year,
         end_year=end_year,
     )
+
+    return {
+        year: base_income[year]
+        + PLAN.tax_exempt_interest_by_year.get(
+            year,
+            Decimal("0"),
+        )
+        for year in base_income
+    }
+
+
+def build_social_security_benefit_schedule(
+    start_year: int | None = None,
+    end_year: int | None = None,
+) -> dict[int, Decimal]:
+    """Build annual Social Security benefit assumptions."""
+
+    if start_year is None:
+        start_year = PLAN.retirement_start.year
+
+    if end_year is None:
+        end_year = PLAN.retirement_end_year
+
+    if start_year > end_year:
+        raise ValueError(
+            "start_year cannot be greater than end_year."
+        )
+
+    if not PLAN.social_security_enabled:
+        return {
+            year: Decimal("0")
+            for year in range(start_year, end_year + 1)
+        }
+
+    return {
+        year: PLAN.social_security_benefits_by_year.get(
+            year,
+            Decimal("0"),
+        )
+        for year in range(start_year, end_year + 1)
+    }
 
 
 def print_plan():

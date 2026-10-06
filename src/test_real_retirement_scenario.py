@@ -43,6 +43,50 @@ def test_real_retirement_config_supplies_provisional_income_schedule():
             PLAN.retirement_end_year + 1,
         )
     }
+    assert config.social_security_by_year == {
+        year: Decimal("0")
+        for year in range(
+            PLAN.retirement_start.year,
+            PLAN.retirement_end_year + 1,
+        )
+    }
+
+
+def test_real_retirement_config_uses_annual_social_security_inputs(
+    monkeypatch,
+):
+
+    monkeypatch.setattr(
+        PLAN,
+        "social_security_benefits_by_year",
+        {
+            2027: Decimal("24000"),
+            2029: Decimal("26000"),
+        },
+    )
+    monkeypatch.setattr(
+        PLAN,
+        "tax_exempt_interest_by_year",
+        {
+            2027: Decimal("1200"),
+            2028: Decimal("1500"),
+        },
+    )
+
+    config = build_real_retirement_config()
+
+    assert config.social_security_by_year[2027] == Decimal("24000")
+    assert config.social_security_by_year[2028] == Decimal("0")
+    assert config.social_security_by_year[2029] == Decimal("26000")
+    assert config.social_security_other_income_by_year[2027] == (
+        PLAN.annual_base_taxable_income + Decimal("1200")
+    )
+    assert config.social_security_other_income_by_year[2028] == (
+        PLAN.annual_base_taxable_income + Decimal("1500")
+    )
+    assert config.social_security_other_income_by_year[2029] == (
+        PLAN.annual_base_taxable_income
+    )
 
 
 def test_real_retirement_scenario_uses_partial_first_year():
