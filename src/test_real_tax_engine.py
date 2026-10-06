@@ -7,6 +7,7 @@ from tax_engine import (
     NC_TAX_RATE,
     TaxBracket,
     calculate_conversion_tax_mfj_2026,
+    calculate_employee_payroll_taxes_mfj_2026,
     calculate_federal_incremental_tax_mfj_2026,
     calculate_federal_tax_mfj_2026,
     calculate_federal_tax_with_preferential_income_mfj_2026,
@@ -88,6 +89,31 @@ def test_qualified_dividends_and_long_term_gains_use_preferential_rates():
 
     assert tax == Decimal("9269.00")
     assert tax < calculate_federal_tax_mfj_2026(Decimal("100000"))
+
+
+def test_employee_payroll_tax_applies_social_security_cap_per_person():
+    result = calculate_employee_payroll_taxes_mfj_2026(
+        {
+            "Chris": Decimal("200000"),
+            "Stephanie": Decimal("200000"),
+        }
+    )
+
+    assert result.social_security_tax == Decimal("22878.00")
+    assert result.medicare_tax == Decimal("5800.00")
+    assert result.additional_medicare_tax == Decimal("1350.00")
+    assert result.total_tax == Decimal("30028.00")
+
+
+def test_employee_payroll_tax_rejects_negative_wages():
+    try:
+        calculate_employee_payroll_taxes_mfj_2026(
+            {"Chris": Decimal("-1")}
+        )
+    except ValueError as error:
+        assert str(error) == "Employment wages cannot be negative for Chris."
+    else:
+        raise AssertionError("Negative employment wages should be rejected.")
 
 
 def test_flat_tax():

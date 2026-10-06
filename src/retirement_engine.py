@@ -53,6 +53,10 @@ class RetirementEngineConfig:
         default_factory=dict
     )
 
+    payroll_tax_by_year: dict[int, Decimal] = field(
+        default_factory=dict
+    )
+
     social_security_by_year: dict[int, Decimal] = field(
         default_factory=dict
     )
@@ -113,6 +117,8 @@ class RetirementYearResult:
     transaction_income: Decimal
 
     employment_income: Decimal
+
+    payroll_tax: Decimal
 
     rental_income: Decimal
 
@@ -923,11 +929,18 @@ def run_retirement_engine(
             year,
         )
 
+        payroll_tax = _to_decimal(
+            config.payroll_tax_by_year.get(year, ZERO)
+        )
+        if payroll_tax < ZERO:
+            raise ValueError("Payroll taxes cannot be negative.")
+
         outside_income = (
             transaction_income
             + employment_income
             + rental_income
             + social_security
+            - payroll_tax
         )
 
         net_spending_need = max(
@@ -1053,6 +1066,7 @@ def run_retirement_engine(
                 planned_spending=planned_spending,
                 transaction_income=transaction_income,
                 employment_income=employment_income,
+                payroll_tax=payroll_tax,
                 rental_income=rental_income,
                 social_security=social_security,
                 outside_income=outside_income,

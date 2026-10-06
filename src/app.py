@@ -123,6 +123,7 @@ def _overview_rows(
             "Beginning portfolio": row.beginning_portfolio,
             "Spending": row.planned_spending,
             "Outside income": row.total_income,
+            "Payroll taxes": row.payroll_tax,
             "Income tax": row.base_income_tax,
             "Gross withdrawal": row.gross_withdrawal,
             "Withdrawal tax": row.withdrawal_tax,
@@ -761,8 +762,9 @@ def _show_overview() -> None:
 
     st.warning(
         "Tax estimates use the income-source assumptions from Retirement "
-        "Plan and Social Security. Rental losses are limited to zero, and "
-        "short-term gains, capital losses, payroll taxes, and property-"
+        "Plan and Social Security. Employee payroll taxes use 2026 rates "
+        "throughout the projection. Rental losses are limited to zero, and "
+        "short-term gains, capital losses, self-employment taxes, and property-"
         "specific rental tax limits are not modeled."
     )
 
@@ -798,6 +800,7 @@ def _show_overview() -> None:
         column_config={
             "Spending": st.column_config.NumberColumn(format="$%.2f"),
             "Outside income": st.column_config.NumberColumn(format="$%.2f"),
+            "Payroll taxes": st.column_config.NumberColumn(format="$%.2f"),
             "Income tax": st.column_config.NumberColumn(format="$%.2f"),
             "Gross withdrawal": st.column_config.NumberColumn(format="$%.2f"),
             "Withdrawal tax": st.column_config.NumberColumn(format="$%.2f"),
@@ -874,6 +877,11 @@ def _show_retirement_plan() -> None:
     st.caption(
         "Enter recurring income sources and dates. CROS derives each year's "
         "income and tax base; imported transaction inflows are not used."
+    )
+    st.caption(
+        "Gross salary is reduced by estimated employee Social Security and "
+        "Medicare taxes using the published 2026 rates and wage base, held "
+        "constant across the projection. Employer payroll taxes are excluded."
     )
     current_income = _current_income_assumptions()
     with st.form("modeled_income_assumptions"):
@@ -1037,6 +1045,11 @@ def _show_retirement_plan() -> None:
                 {
                     "Year": year,
                     "Employment income": modeled_income["employment_income"][year],
+                    "Payroll taxes": modeled_income["payroll_tax"][year],
+                    "Net employment income": (
+                        modeled_income["employment_income"][year]
+                        - modeled_income["payroll_tax"][year]
+                    ),
                     "Net rental cash flow": modeled_income["rental_income"][year],
                     "Taxable investment income": modeled_income[
                         "taxable_investment_income"
@@ -1058,6 +1071,8 @@ def _show_retirement_plan() -> None:
             column: st.column_config.NumberColumn(format="$%.2f")
             for column in (
                 "Employment income",
+                "Payroll taxes",
+                "Net employment income",
                 "Net rental cash flow",
                 "Taxable investment income",
                 "Qualified dividends",

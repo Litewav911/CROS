@@ -123,6 +123,23 @@ def test_retirement_report_calculates_net_withdrawal():
     )
 
 
+def test_retirement_report_shows_payroll_tax_and_nets_outside_income():
+    config = RetirementEngineConfig(
+        start_year=2027,
+        end_year=2027,
+        monthly_spending_target=Decimal("0"),
+        employment_income_by_year={2027: Decimal("80000")},
+        payroll_tax_by_year={2027: Decimal("6120")},
+        rental_income_by_year={2027: Decimal("0")},
+        initial_balances={},
+    )
+
+    row = build_retirement_report(run_retirement_engine(config))[0]
+
+    assert row.payroll_tax == Decimal("6120")
+    assert row.total_income == Decimal("73880")
+
+
 def test_retirement_report_preserves_withdrawal_sources():
 
     config = RetirementEngineConfig(

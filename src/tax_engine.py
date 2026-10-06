@@ -1,6 +1,6 @@
 from dataclasses import dataclass
-from decimal import Decimal
-from typing import List
+from decimal import Decimal, ROUND_HALF_UP
+from typing import List, Mapping
 
 
 @dataclass
@@ -24,6 +24,23 @@ class TaxResult:
 
     taxable_income: Decimal
     tax: Decimal
+
+
+@dataclass
+class PayrollTaxResult:
+    """Employee share of federal Social Security and Medicare taxes."""
+
+    social_security_tax: Decimal
+    medicare_tax: Decimal
+    additional_medicare_tax: Decimal
+
+    @property
+    def total_tax(self) -> Decimal:
+        return (
+            self.social_security_tax
+            + self.medicare_tax
+            + self.additional_medicare_tax
+        )
 
 
 # ============================================================
@@ -78,6 +95,12 @@ FEDERAL_MFJ_2026_CAPITAL_GAINS_ZERO_RATE_LIMIT = Decimal(
 FEDERAL_MFJ_2026_CAPITAL_GAINS_15_RATE_LIMIT = Decimal(
     "613700"
 )
+
+SOCIAL_SECURITY_WAGE_BASE_2026 = Decimal("184500")
+SOCIAL_SECURITY_EMPLOYEE_TAX_RATE_2026 = Decimal("0.062")
+MEDICARE_EMPLOYEE_TAX_RATE_2026 = Decimal("0.0145")
+ADDITIONAL_MEDICARE_MFJ_THRESHOLD_2026 = Decimal("250000")
+ADDITIONAL_MEDICARE_EMPLOYEE_TAX_RATE_2026 = Decimal("0.009")
 
 
 # ============================================================
@@ -369,6 +392,53 @@ def calculate_federal_incremental_tax_mfj_2026(
         base_taxable_income,
         additional_income,
         FEDERAL_MFJ_2026_BRACKETS,
+    )
+
+
+def calculate_employee_payroll_taxes_mfj_2026(
+    wages_by_person: Mapping[str, Decimal],
+) -> PayrollTaxResult:
+    """Calculate estimated employee FICA taxes on household wages.
+
+    The Social Security wage base applies separately to each person;
+    Additional Medicare Tax uses the joint $250,000 wage threshold.
+    Employer payroll taxes are excluded.
+    """
+
+    social_security_wages = Decimal("0")
+    medicare_wages = Decimal("0")
+    for person, wages in wages_by_person.items():
+        wages = Decimal(str(wages))
+        if wages < 0:
+            raise ValueError(
+                f"Employment wages cannot be negative for {person}."
+            )
+        social_security_wages += min(
+            wages,
+            SOCIAL_SECURITY_WAGE_BASE_2026,
+        )
+        medicare_wages += wages
+
+    social_security_tax = (
+        social_security_wages
+        * SOCIAL_SECURITY_EMPLOYEE_TAX_RATE_2026
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    medicare_tax = (
+        medicare_wages
+        * MEDICARE_EMPLOYEE_TAX_RATE_2026
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+    additional_medicare_tax = (
+        max(
+            Decimal("0"),
+            medicare_wages - ADDITIONAL_MEDICARE_MFJ_THRESHOLD_2026,
+        )
+        * ADDITIONAL_MEDICARE_EMPLOYEE_TAX_RATE_2026
+    ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+    return PayrollTaxResult(
+        social_security_tax=social_security_tax,
+        medicare_tax=medicare_tax,
+        additional_medicare_tax=additional_medicare_tax,
     )
 
 

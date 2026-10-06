@@ -78,6 +78,7 @@ def build_real_retirement_config(
         employment_income_by_year=(
             income_schedules["employment_income"]
         ),
+        payroll_tax_by_year=(income_schedules["payroll_tax"]),
         rental_income_by_year=(income_schedules["rental_income"]),
         social_security_by_year=(
             social_security_by_year
@@ -160,6 +161,7 @@ def _outside_income(
         + result.employment_income
         + result.rental_income
         + result.social_security
+        - result.payroll_tax
     )
 
 

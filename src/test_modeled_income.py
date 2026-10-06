@@ -100,6 +100,54 @@ def test_qualified_dividends_cannot_exceed_total_ordinary_dividends():
         raise AssertionError("Qualified dividends must be a subset of dividends.")
 
 
+def test_payroll_tax_schedule_uses_wages_for_each_person():
+    schedules = build_modeled_income_schedules(
+        start_year=2027,
+        end_year=2027,
+        income_assumptions={
+            "employment": {
+                "Chris": {
+                    "annual_salary": Decimal("200000"),
+                    "last_work_date": date(2027, 12, 31),
+                },
+                "Stephanie": {
+                    "annual_salary": Decimal("200000"),
+                    "last_work_date": date(2027, 12, 31),
+                },
+            }
+        },
+    )
+
+    assert schedules["payroll_tax"] == {2027: Decimal("30028.00")}
+    assert schedules["social_security_payroll_tax"] == {
+        2027: Decimal("22878.00")
+    }
+    assert schedules["medicare_payroll_tax"] == {
+        2027: Decimal("5800.00")
+    }
+    assert schedules["additional_medicare_tax"] == {
+        2027: Decimal("1350.00")
+    }
+
+
+def test_payroll_taxes_reduce_employment_cash_flow_in_retirement_engine():
+    config = RetirementEngineConfig(
+        start_year=2027,
+        end_year=2027,
+        monthly_spending_target=Decimal("0"),
+        employment_income_by_year={2027: Decimal("80000")},
+        payroll_tax_by_year={2027: Decimal("6120")},
+        rental_income_by_year={2027: Decimal("0")},
+        initial_balances={},
+    )
+
+    result = run_retirement_engine(config)[0]
+
+    assert result.employment_income == Decimal("80000")
+    assert result.payroll_tax == Decimal("6120")
+    assert result.outside_income == Decimal("73880")
+
+
 def test_modeled_income_tax_is_included_in_portfolio_cash_need():
     config = RetirementEngineConfig(
         start_year=2027,

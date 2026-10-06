@@ -28,6 +28,7 @@ class RetirementReportRow:
     beginning_portfolio: Decimal
     planned_spending: Decimal
     total_income: Decimal
+    payroll_tax: Decimal
     base_income_tax: Decimal
     gross_withdrawal: Decimal
     withdrawal_tax: Decimal
@@ -60,6 +61,7 @@ def build_retirement_report(
             + result.employment_income
             + result.rental_income
             + result.social_security
+            - result.payroll_tax
         )
 
         net_withdrawal = (
@@ -73,6 +75,7 @@ def build_retirement_report(
                 beginning_portfolio=result.beginning_total,
                 planned_spending=result.planned_spending,
                 total_income=total_income,
+                payroll_tax=result.payroll_tax,
                 base_income_tax=result.base_income_tax,
                 gross_withdrawal=result.gross_withdrawal,
                 withdrawal_tax=result.withdrawal_tax,
@@ -310,6 +313,7 @@ def build_real_retirement_config() -> RetirementEngineConfig:
         employment_income_by_year=(
             income_schedules["employment_income"]
         ),
+        payroll_tax_by_year=(income_schedules["payroll_tax"]),
         rental_income_by_year=(income_schedules["rental_income"]),
         social_security_by_year=(
             build_social_security_benefit_schedule(

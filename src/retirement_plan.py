@@ -6,6 +6,7 @@ from rental_cashflow import monthly_rental_cashflow
 from tax_engine import (
     FEDERAL_STANDARD_DEDUCTION_MFJ_2026,
     NC_MFJ_STANDARD_DEDUCTION,
+    calculate_employee_payroll_taxes_mfj_2026,
 )
 
 
@@ -205,7 +206,14 @@ def build_modeled_income_schedules(
     employment_by_year = {
         year: Decimal("0") for year in range(start_year, end_year + 1)
     }
-    for source in employment_assumptions.values():
+    employment_by_person_by_year = {
+        name: {
+            year: Decimal("0")
+            for year in range(start_year, end_year + 1)
+        }
+        for name in employment_assumptions
+    }
+    for name, source in employment_assumptions.items():
         annual_salary = Decimal(str(source.get("annual_salary", 0)))
         last_work_date = source.get("last_work_date")
         if annual_salary < 0:
@@ -226,9 +234,9 @@ def build_modeled_income_schedules(
             paid_through = min(last_work_date, year_end)
             paid_days = (paid_through - year_start).days + 1
             year_days = (year_end - year_start).days + 1
-            employment_by_year[year] += (
-                annual_salary * Decimal(paid_days) / Decimal(year_days)
-            )
+            wages = annual_salary * Decimal(paid_days) / Decimal(year_days)
+            employment_by_year[year] += wages
+            employment_by_person_by_year[name][year] += wages
 
     investment_by_year = {}
     ordinary_income_by_year = {}
@@ -239,8 +247,26 @@ def build_modeled_income_schedules(
     qualified_dividends_by_year = {}
     capital_gains_by_year = {}
     total_income_by_year = {}
+    payroll_tax_by_year = {}
+    social_security_payroll_tax_by_year = {}
+    medicare_payroll_tax_by_year = {}
+    additional_medicare_tax_by_year = {}
     rental_by_year = {}
     for year in range(start_year, end_year + 1):
+        payroll_tax = calculate_employee_payroll_taxes_mfj_2026(
+            {
+                name: wages_by_year[year]
+                for name, wages_by_year in employment_by_person_by_year.items()
+            }
+        )
+        payroll_tax_by_year[year] = payroll_tax.total_tax
+        social_security_payroll_tax_by_year[year] = (
+            payroll_tax.social_security_tax
+        )
+        medicare_payroll_tax_by_year[year] = payroll_tax.medicare_tax
+        additional_medicare_tax_by_year[year] = (
+            payroll_tax.additional_medicare_tax
+        )
         years_after_start = year - start_year
         growth_factor = (
             (Decimal("1") + investment_growth) ** years_after_start
@@ -281,6 +307,11 @@ def build_modeled_income_schedules(
 
     return {
         "employment_income": employment_by_year,
+        "employment_income_by_person": employment_by_person_by_year,
+        "payroll_tax": payroll_tax_by_year,
+        "social_security_payroll_tax": social_security_payroll_tax_by_year,
+        "medicare_payroll_tax": medicare_payroll_tax_by_year,
+        "additional_medicare_tax": additional_medicare_tax_by_year,
         "rental_income": rental_by_year,
         "taxable_investment_income": investment_by_year,
         "qualified_dividends": qualified_dividends_by_year,
