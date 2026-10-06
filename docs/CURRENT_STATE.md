@@ -11,10 +11,10 @@ The planning horizon is 2027–2040, with retirement beginning in 2027. The appl
 ## Current Git State
 
 - Branch: `master`
-- Latest commit: `a4a3f17` - Wire provisional income into retirement scenarios
+- Latest commit: `e0785a5` - Add annual Social Security plan inputs
 - Remote: `origin/master`
-- `master` was synchronized with `origin/master` at `a4a3f17` before the current local changes.
-- Current uncommitted changes are in `docs/CURRENT_STATE.md`, `src/real_retirement_scenario.py`, `src/retirement_plan.py`, `src/retirement_report.py`, and `src/test_real_retirement_scenario.py`.
+- `master` was synchronized with `origin/master` at `e0785a5` before the current local changes.
+- Current uncommitted changes are in `docs/CURRENT_STATE.md`, `src/retirement_plan.py`, and `src/test_real_retirement_scenario.py`.
 
 Run `git status -sb` and `git log` before relying on this snapshot; repository state may have changed since it was written.
 
@@ -53,7 +53,7 @@ The taxable-benefit calculation now caps the 50% tier at the interval between th
 
 The Social Security tests cover below-threshold income, partial taxation, the 50% tier, the 85% tier before the benefit cap, the maximum taxable benefit, zero benefits, and negative-input validation.
 
-The retirement engine passes Social Security benefits into federal Roth-conversion and tax-deferred-withdrawal calculations. Federal tax is calculated on ordinary taxable income plus taxable Social Security, while a separate `social_security_other_income_by_year` input supplies the non-Social-Security income component used for provisional income. Conversions and withdrawals are added to both ordinary taxable income and this provisional-income component. If the separate input is omitted, the engine preserves compatibility by using base taxable income for provisional income. `RetirementPlan` now accepts per-year Social Security benefits and tax-exempt interest. Both real-scenario builders pass those schedules to the engine; unspecified benefits and interest default to zero. The provisional-income builder adds tax-exempt interest to the existing $100,000 annual base taxable-income proxy. Actual non-Social-Security income and benefit values have not been supplied, so these defaults and the proxy remain in effect. Gross Social Security remains included in outside cash income when a benefit amount is supplied. North Carolina conversion and withdrawal tax remains calculated using its current flat-rate model.
+The retirement engine passes Social Security benefits into federal Roth-conversion and tax-deferred-withdrawal calculations. Federal tax is calculated on ordinary taxable income plus taxable Social Security, while a separate `social_security_other_income_by_year` input supplies the non-Social-Security income component used for provisional income. Conversions and withdrawals are added to both ordinary taxable income and this provisional-income component. If the separate input is omitted, the engine preserves compatibility by using base taxable income for provisional income. `RetirementPlan` accepts per-year non-Social-Security taxable income before deductions, Social Security benefits, and tax-exempt interest. Both real-scenario builders pass these schedules to the engine. Unspecified annual income falls back to the existing $100,000 base taxable-income proxy; benefits and tax-exempt interest default to zero. Actual annual values have not been supplied, so the proxy and zero defaults remain in effect. Gross Social Security remains included in outside cash income when a benefit amount is supplied. North Carolina conversion and withdrawal tax remains calculated using its current flat-rate model.
 
 ## Current Test Coverage
 
@@ -65,11 +65,11 @@ The latest full test run collected 68 tests and completed with 68 passed and 0 f
 
 ## Recommended Next Development Step
 
-Continue retirement-planning development from the verified repository state.
+When actual annual income and benefit data are available, populate the new retirement-plan schedules and replace the proxy and zero defaults.
 
 ## Deferred Data Issue
 
-For now, keep using the $100,000 annual base taxable-income assumption as the real scenario's Social Security provisional-income proxy, with tax-exempt interest and Social Security benefits defaulting to zero. Revisit this when actual annual inputs are available: non-Social-Security income before deductions, tax-exempt interest, and Social Security benefits. The repository's imported income transaction is test data and must not be used as a real assumption.
+For now, keep using the $100,000 annual base taxable-income assumption as the real scenario's Social Security provisional-income proxy, with tax-exempt interest and Social Security benefits defaulting to zero. The new `non_social_security_taxable_income_by_year`, `tax_exempt_interest_by_year`, and `social_security_benefits_by_year` inputs are ready for actual annual values. The repository's imported income transaction is test data and must not be used as a real assumption.
 
 ## Development Workflow
 

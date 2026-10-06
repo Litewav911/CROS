@@ -31,6 +31,10 @@ class RetirementPlan:
 
     annual_return_assumption: Decimal
 
+    non_social_security_taxable_income_by_year: dict[
+        int, Decimal
+    ] = field(default_factory=dict)
+
     social_security_benefits_by_year: dict[int, Decimal] = field(
         default_factory=dict
     )
@@ -169,11 +173,11 @@ def build_social_security_other_income_schedule(
     start_year: int | None = None,
     end_year: int | None = None,
 ) -> dict[int, Decimal]:
-    """Build the provisional-income proxy available in the plan.
+    """Build the non-Social-Security income used for provisional income.
 
-    CROS currently has no separate gross-income or tax-exempt
-    interest assumptions. Use the existing base taxable-income
-    assumption explicitly until those inputs are available.
+    Use the annual non-Social-Security income input when provided.
+    Otherwise retain the existing base taxable-income assumption
+    as a proxy. Add tax-exempt interest for each year.
     """
 
     base_income = build_base_taxable_income_schedule(
@@ -182,7 +186,10 @@ def build_social_security_other_income_schedule(
     )
 
     return {
-        year: base_income[year]
+        year: PLAN.non_social_security_taxable_income_by_year.get(
+            year,
+            base_income[year],
+        )
         + PLAN.tax_exempt_interest_by_year.get(
             year,
             Decimal("0"),
