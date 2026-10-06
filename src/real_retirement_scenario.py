@@ -33,7 +33,11 @@ STARTING_BALANCES = {
 }
 
 
-def build_real_retirement_config() -> RetirementEngineConfig:
+def build_real_retirement_config(
+    monthly_spending_target: Decimal | None = None,
+    annual_return_assumption: Decimal | None = None,
+    annual_roth_conversion_target: Decimal | None = None,
+) -> RetirementEngineConfig:
     """
     Build the current real-plan configuration.
 
@@ -51,8 +55,16 @@ def build_real_retirement_config() -> RetirementEngineConfig:
     return RetirementEngineConfig(
         start_year=START_YEAR,
         end_year=END_YEAR,
-        annual_return=ANNUAL_RETURN,
-        monthly_spending_target=MONTHLY_SPENDING_TARGET,
+        annual_return=(
+            ANNUAL_RETURN
+            if annual_return_assumption is None
+            else Decimal(str(annual_return_assumption))
+        ),
+        monthly_spending_target=(
+            MONTHLY_SPENDING_TARGET
+            if monthly_spending_target is None
+            else Decimal(str(monthly_spending_target))
+        ),
         retirement_start=PLAN.retirement_start,
         prorate_first_retirement_year=True,
         initial_balances=STARTING_BALANCES.copy(),
@@ -78,18 +90,29 @@ def build_real_retirement_config() -> RetirementEngineConfig:
             build_roth_conversion_schedule(
                 start_year=START_YEAR,
                 end_year=END_YEAR,
+                annual_roth_conversion_target=(
+                    annual_roth_conversion_target
+                ),
             )
         ),
         conversion_tax_funded_from_withdrawal=True,
     )
 
 
-def run_real_retirement_scenario() -> list[RetirementYearResult]:
+def run_real_retirement_scenario(
+    monthly_spending_target: Decimal | None = None,
+    annual_return_assumption: Decimal | None = None,
+    annual_roth_conversion_target: Decimal | None = None,
+) -> list[RetirementYearResult]:
     """
     Run the current real 2027-2040 retirement scenario.
     """
 
-    config = build_real_retirement_config()
+    config = build_real_retirement_config(
+        monthly_spending_target=monthly_spending_target,
+        annual_return_assumption=annual_return_assumption,
+        annual_roth_conversion_target=annual_roth_conversion_target,
+    )
 
     return run_retirement_engine(
         config

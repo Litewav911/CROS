@@ -10,15 +10,15 @@ The planning horizon is 2027–2040, with retirement beginning in 2027. The appl
 
 ## Established User Interface Decision
 
-CROS will use a local dashboard with Overview, Transactions & Spending, Accounts, Retirement Plan, Social Security, and Taxes & Roth Conversions sections. The Overview will show annual spending, account balances, projected withdrawals, taxes, and the year-by-year plan. Users will edit assumptions in the relevant sections and view the updated projection. `src/app.py` now implements the Streamlit navigation shell and Overview using the existing real-retirement scenario and report; the other sections currently show planned-feature placeholders. `src/main.py` remains the original console placeholder.
+CROS will use a local dashboard with Overview, Transactions & Spending, Accounts, Retirement Plan, Social Security, and Taxes & Roth Conversions sections. The Overview will show annual spending, account balances, projected withdrawals, taxes, and the year-by-year plan. Users will edit assumptions in the relevant sections and view the updated projection. `src/app.py` now implements the Streamlit navigation shell, Overview, and Retirement Plan form. The form changes monthly spending, annual return, and Roth conversion target for the projection without mutating the global plan defaults. Transactions & Spending, Accounts, Social Security, and Taxes & Roth Conversions remain placeholders. `src/main.py` remains the original console placeholder.
 
 ## Current Git State
 
 - Branch: `master`
-- Latest commit: `c44d205` - Add pre-deduction Social Security income inputs
+- Latest commit: `acc0e1a` - Add local retirement dashboard overview
 - Remote: `origin/master`
-- `master` is synchronized with `origin/master` at `c44d205`.
-- Current uncommitted changes include the established UI and modeling decisions in `README.md` and this file, plus the initial dashboard in `src/app.py`, its tests in `src/test_dashboard.py`, and the Streamlit dependency in `requirements.txt`.
+- `master` is synchronized with `origin/master` at `acc0e1a` before the current local changes.
+- Current uncommitted changes include the Retirement Plan controls and scenario overrides in `src/app.py`, `src/real_retirement_scenario.py`, and `src/retirement_plan.py`; coverage in `src/test_dashboard.py` and `src/test_real_retirement_scenario.py`; plus the launcher and its documentation in `start_dashboard.ps1`, `README.md`, and this file.
 
 Run `git status -sb` and `git log` before relying on this snapshot; repository state may have changed since it was written.
 
@@ -65,13 +65,13 @@ The retirement engine passes Social Security benefits into federal Roth-conversi
 
 The retirement engine tests include regression coverage for separate provisional-income inputs in conversion and withdrawal taxation. The retirement engine, report, real retirement scenario, annual withdrawal, Social Security tax, and withdrawal engine also have pytest coverage under `src/`.
 
-The dashboard uses Streamlit 1.65.0 and pandas. Its Overview reads the tested 2027–2040 real retirement scenario through `build_retirement_report`, displaying portfolio totals, yearly spending, outside income, withdrawals, taxes, Roth conversions, account withdrawal sources, market-decline flags, and final account balances. A visible note explains that taxable income and Social Security inputs still use temporary assumptions. The remaining navigation sections are placeholders.
+The dashboard uses Streamlit 1.65.0 and pandas. Its Overview reads the tested 2027–2040 real retirement scenario through `build_retirement_report`, displaying portfolio totals, yearly spending, outside income, withdrawals, taxes, Roth conversions, account withdrawal sources, market-decline flags, and final account balances. A visible note explains that taxable income and Social Security inputs still use temporary assumptions. The Retirement Plan form accepts monthly spending, annual return, and annual Roth conversion target, then feeds those saved session values into the scenario builder. The income proxy and Social Security defaults remain unchanged. Transactions & Spending, Accounts, Social Security, and Taxes & Roth Conversions remain placeholders. `start_dashboard.ps1` launches the app hidden from `.venv`, waits for `/_stcore/health`, and reports the URL once the service is ready. It binds only to `127.0.0.1` and leaves browser opening to the user.
 
-The dashboard tests cover the established section names and the Overview's 14-year projection data. The full pytest suite collected 70 tests and completed with 70 passed and 0 failed using Python 3.14.8 and pytest 9.1.1.
+The dashboard tests cover the established section names, the Overview's 14-year projection data, and recalculation with applied plan assumptions. Scenario tests verify the spending, return, and conversion overrides and confirm the temporary income and Social Security schedules stay unchanged. The full pytest suite collected 73 tests and completed with 73 passed and 0 failed using Python 3.14.8 and pytest 9.1.1. The PowerShell launcher also parses successfully.
 
 ## Recommended Next Development Step
 
-Build the first editable Retirement Plan controls and connect their values to scenario recalculation. Keep the pinned income-proxy and Social Security estimator work deferred until that work is explicitly resumed.
+Build the Accounts section to show starting balances, year-by-year projected balances, and withdrawal sources by account. Keep the taxable-income proxy and Social Security estimator requirements intact while building that view.
 
 ## Deferred Data Issue
 

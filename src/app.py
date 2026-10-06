@@ -5,6 +5,7 @@ import streamlit as st
 
 from real_retirement_scenario import run_real_retirement_scenario
 from retirement_report import build_retirement_report
+from retirement_plan import PLAN
 
 
 SECTIONS = (
@@ -21,8 +22,40 @@ def _money(value: Decimal) -> str:
     return f"${value:,.0f}"
 
 
-def _overview_rows() -> list[dict[str, object]]:
-    results = run_real_retirement_scenario()
+def _default_plan_assumptions() -> dict[str, Decimal]:
+    return {
+        "monthly_spending_target": PLAN.monthly_spending_target,
+        "annual_return_assumption": PLAN.annual_return_assumption,
+        "annual_roth_conversion_target": (
+            PLAN.annual_roth_conversion_target
+        ),
+    }
+
+
+def _current_plan_assumptions() -> dict[str, Decimal]:
+    return st.session_state.get(
+        "plan_assumptions",
+        _default_plan_assumptions(),
+    )
+
+
+def _overview_rows(
+    plan_assumptions: dict[str, Decimal] | None = None,
+) -> list[dict[str, object]]:
+    if plan_assumptions is None:
+        plan_assumptions = _default_plan_assumptions()
+
+    results = run_real_retirement_scenario(
+        monthly_spending_target=(
+            plan_assumptions["monthly_spending_target"]
+        ),
+        annual_return_assumption=(
+            plan_assumptions["annual_return_assumption"]
+        ),
+        annual_roth_conversion_target=(
+            plan_assumptions["annual_roth_conversion_target"]
+        ),
+    )
     report = build_retirement_report(results)
 
     return [
@@ -48,7 +81,7 @@ def _overview_rows() -> list[dict[str, object]]:
 
 
 def _show_overview() -> None:
-    rows = _overview_rows()
+    rows = _overview_rows(_current_plan_assumptions())
     frame = pd.DataFrame(rows)
 
     first = rows[0]
@@ -129,6 +162,53 @@ def _show_overview() -> None:
     )
 
 
+def _show_retirement_plan() -> None:
+    assumptions = _current_plan_assumptions()
+
+    st.title("Retirement plan")
+    st.caption("Adjust plan assumptions and apply them to the projection.")
+
+    with st.form("retirement_plan_assumptions"):
+        monthly_spending = st.number_input(
+            "Monthly spending target ($)",
+            min_value=0.0,
+            value=float(assumptions["monthly_spending_target"]),
+            step=100.0,
+            format="%.2f",
+            key="plan_input_monthly_spending",
+        )
+        annual_return_percent = st.number_input(
+            "Annual return assumption (%)",
+            value=float(assumptions["annual_return_assumption"] * 100),
+            step=0.25,
+            format="%.2f",
+            key="plan_input_annual_return_percent",
+        )
+        annual_roth_conversion = st.number_input(
+            "Annual Roth conversion target ($)",
+            min_value=0.0,
+            value=float(assumptions["annual_roth_conversion_target"]),
+            step=1000.0,
+            format="%.2f",
+            key="plan_input_annual_roth_conversion",
+        )
+        submitted = st.form_submit_button("Apply plan settings")
+
+    if submitted:
+        st.session_state["plan_assumptions"] = {
+            "monthly_spending_target": Decimal(str(monthly_spending)),
+            "annual_return_assumption": (
+                Decimal(str(annual_return_percent)) / Decimal("100")
+            ),
+            "annual_roth_conversion_target": (
+                Decimal(str(annual_roth_conversion))
+            ),
+        }
+        st.success(
+            "Plan settings applied. Select Overview to see the updated projection."
+        )
+
+
 def main() -> None:
     st.set_page_config(
         page_title="CROS Retirement Dashboard",
@@ -141,6 +221,10 @@ def main() -> None:
 
     if section == "Overview":
         _show_overview()
+        return
+
+    if section == "Retirement Plan":
+        _show_retirement_plan()
         return
 
     st.title(section)

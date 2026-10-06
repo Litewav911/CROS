@@ -52,6 +52,42 @@ def test_real_retirement_config_supplies_provisional_income_schedule():
     }
 
 
+def test_real_retirement_config_accepts_plan_assumption_overrides():
+
+    config = build_real_retirement_config(
+        monthly_spending_target=Decimal("12500"),
+        annual_return_assumption=Decimal("0.04"),
+        annual_roth_conversion_target=Decimal("50000"),
+    )
+
+    assert config.monthly_spending_target == Decimal("12500")
+    assert config.annual_return == Decimal("0.04")
+    assert config.roth_conversions_by_year == {
+        year: {"Chris 401(k)": Decimal("50000")}
+        for year in range(2027, 2041)
+    }
+    assert config.base_taxable_income_by_year == {
+        year: PLAN.annual_base_taxable_income
+        for year in range(2027, 2041)
+    }
+    assert config.social_security_by_year == {
+        year: Decimal("0")
+        for year in range(2027, 2041)
+    }
+
+
+def test_real_retirement_scenario_applies_plan_assumption_overrides():
+
+    results = run_real_retirement_scenario(
+        monthly_spending_target=Decimal("12500"),
+        annual_return_assumption=Decimal("0.04"),
+        annual_roth_conversion_target=Decimal("50000"),
+    )
+
+    assert results[0].planned_spending > Decimal("101621.92")
+    assert results[0].conversion_amount == Decimal("50000")
+
+
 def test_real_retirement_config_uses_annual_social_security_inputs(
     monkeypatch,
 ):

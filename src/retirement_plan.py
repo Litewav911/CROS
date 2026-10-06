@@ -94,6 +94,7 @@ PLAN = RetirementPlan(
 def build_roth_conversion_schedule(
     start_year: int | None = None,
     end_year: int | None = None,
+    annual_roth_conversion_target: Decimal | None = None,
 ) -> dict[int, dict[str, Decimal]]:
     """
     Build the Roth-conversion schedule for the real retirement
@@ -124,10 +125,16 @@ def build_roth_conversion_schedule(
             "start_year cannot be greater than end_year."
         )
 
+    conversion_target = (
+        PLAN.annual_roth_conversion_target
+        if annual_roth_conversion_target is None
+        else Decimal(str(annual_roth_conversion_target))
+    )
+
     return {
         year: {
             "Chris 401(k)": (
-                PLAN.annual_roth_conversion_target
+                conversion_target
             )
         }
         for year in range(

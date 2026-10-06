@@ -1,3 +1,5 @@
+from decimal import Decimal
+
 from app import SECTIONS, _overview_rows
 
 
@@ -21,3 +23,16 @@ def test_dashboard_overview_uses_real_retirement_projection():
     assert "Withdrawal sources" in rows[0]
     assert "Ending portfolio" in rows[-1]
     assert "Roth IRA" in rows[-1]["Ending account balances"]
+
+
+def test_dashboard_overview_uses_applied_plan_assumptions():
+    rows = _overview_rows(
+        {
+            "monthly_spending_target": Decimal("12500"),
+            "annual_return_assumption": Decimal("0.04"),
+            "annual_roth_conversion_target": Decimal("50000"),
+        }
+    )
+
+    assert rows[0]["Spending"] > Decimal("101621.92")
+    assert rows[0]["Roth conversion"] == Decimal("50000")
