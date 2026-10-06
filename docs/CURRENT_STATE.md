@@ -8,13 +8,17 @@ C:\cloud\CROS
 
 The planning horizon is 2027–2040, with retirement beginning in 2027. The application is intended to use actual household financial data to model spending, income, investments, withdrawals, Roth conversions, taxes, Social Security, IRMAA, and year-by-year retirement outcomes.
 
+## Established User Interface Decision
+
+CROS will use a local dashboard with Overview, Transactions & Spending, Accounts, Retirement Plan, Social Security, and Taxes & Roth Conversions sections. The Overview will show annual spending, account balances, projected withdrawals, taxes, and the year-by-year plan. Users will edit assumptions in the relevant sections and view the updated projection. `src/app.py` now implements the Streamlit navigation shell and Overview using the existing real-retirement scenario and report; the other sections currently show planned-feature placeholders. `src/main.py` remains the original console placeholder.
+
 ## Current Git State
 
 - Branch: `master`
-- Latest commit: `e0785a5` - Add annual Social Security plan inputs
+- Latest commit: `c44d205` - Add pre-deduction Social Security income inputs
 - Remote: `origin/master`
-- `master` was synchronized with `origin/master` at `e0785a5` before the current local changes.
-- Current uncommitted changes are in `docs/CURRENT_STATE.md`, `src/retirement_plan.py`, and `src/test_real_retirement_scenario.py`.
+- `master` is synchronized with `origin/master` at `c44d205`.
+- Current uncommitted changes include the established UI and modeling decisions in `README.md` and this file, plus the initial dashboard in `src/app.py`, its tests in `src/test_dashboard.py`, and the Streamlit dependency in `requirements.txt`.
 
 Run `git status -sb` and `git log` before relying on this snapshot; repository state may have changed since it was written.
 
@@ -53,7 +57,7 @@ The taxable-benefit calculation now caps the 50% tier at the interval between th
 
 The Social Security tests cover below-threshold income, partial taxation, the 50% tier, the 85% tier before the benefit cap, the maximum taxable benefit, zero benefits, and negative-input validation.
 
-The retirement engine passes Social Security benefits into federal Roth-conversion and tax-deferred-withdrawal calculations. Federal tax is calculated on ordinary taxable income plus taxable Social Security, while a separate `social_security_other_income_by_year` input supplies the non-Social-Security income component used for provisional income. Conversions and withdrawals are added to both ordinary taxable income and this provisional-income component. If the separate input is omitted, the engine preserves compatibility by using base taxable income for provisional income. `RetirementPlan` accepts per-year non-Social-Security taxable income before deductions, Social Security benefits, and tax-exempt interest. Both real-scenario builders pass these schedules to the engine. Unspecified annual income falls back to the existing $100,000 base taxable-income proxy; benefits and tax-exempt interest default to zero. Actual annual values have not been supplied, so the proxy and zero defaults remain in effect. Gross Social Security remains included in outside cash income when a benefit amount is supplied. North Carolina conversion and withdrawal tax remains calculated using its current flat-rate model.
+The retirement engine passes Social Security benefits into federal Roth-conversion and tax-deferred-withdrawal calculations. Federal tax is calculated on ordinary taxable income plus taxable Social Security, with conversions and tax-deferred withdrawals increasing taxable income. `RetirementPlan` currently accepts annual overrides for non-Social-Security income, Social Security benefits, and tax-exempt interest. The non-Social-Security income override falls back to the $100,000 base taxable-income proxy; benefits and tax-exempt interest default to zero. These are temporary model inputs, not amounts Chris is expected to provide: taxable income should ultimately be calculated from modeled income and account withdrawals, and Social Security benefits should be estimated from answers the app collects. North Carolina conversion and withdrawal tax remains calculated using its current flat-rate model.
 
 ## Current Test Coverage
 
@@ -61,15 +65,17 @@ The retirement engine passes Social Security benefits into federal Roth-conversi
 
 The retirement engine tests include regression coverage for separate provisional-income inputs in conversion and withdrawal taxation. The retirement engine, report, real retirement scenario, annual withdrawal, Social Security tax, and withdrawal engine also have pytest coverage under `src/`.
 
-The latest full test run collected 68 tests and completed with 68 passed and 0 failed using Python 3.14.8 and pytest 9.1.1.
+The dashboard uses Streamlit 1.65.0 and pandas. Its Overview reads the tested 2027–2040 real retirement scenario through `build_retirement_report`, displaying portfolio totals, yearly spending, outside income, withdrawals, taxes, Roth conversions, account withdrawal sources, market-decline flags, and final account balances. A visible note explains that taxable income and Social Security inputs still use temporary assumptions. The remaining navigation sections are placeholders.
+
+The dashboard tests cover the established section names and the Overview's 14-year projection data. The full pytest suite collected 70 tests and completed with 70 passed and 0 failed using Python 3.14.8 and pytest 9.1.1.
 
 ## Recommended Next Development Step
 
-When actual annual income and benefit data are available, populate the new retirement-plan schedules and replace the proxy and zero defaults.
+Build the first editable Retirement Plan controls and connect their values to scenario recalculation. Keep the pinned income-proxy and Social Security estimator work deferred until that work is explicitly resumed.
 
 ## Deferred Data Issue
 
-For now, keep using the $100,000 annual base taxable-income assumption as the real scenario's Social Security provisional-income proxy, with tax-exempt interest and Social Security benefits defaulting to zero. The new `non_social_security_taxable_income_by_year`, `tax_exempt_interest_by_year`, and `social_security_benefits_by_year` inputs are ready for actual annual values. The repository's imported income transaction is test data and must not be used as a real assumption.
+Chris confirmed tax-exempt interest is $0. Keep that assumption. Do not ask Chris to provide non-Social-Security taxable income as a yearly input; CROS must derive it from modeled income and withdrawals, accounting for each account's tax treatment. Social Security benefits also should not be requested as fixed yearly values. The app should ask for the necessary claiming and benefit inputs, then calculate the annual schedule. Until those models are implemented, the $100,000 taxable-income proxy and zero Social Security defaults remain. The repository's imported income transaction is test data and must not be used as a real assumption.
 
 ## Development Workflow
 

@@ -30,3 +30,16 @@ The application will:
 Retirement begins in 2027.
 
 The application will use actual financial data wherever available rather than relying on generic spending assumptions.
+
+## User Interface Direction
+
+CROS will use a local dashboard interface. Its main sections will be:
+
+- Overview
+- Transactions & Spending
+- Accounts
+- Retirement Plan
+- Social Security
+- Taxes & Roth Conversions
+
+The Overview will show annual spending, account balances, projected withdrawals, taxes, and the year-by-year retirement plan. Users will edit assumptions in the relevant sections and view the updated projection. `src/app.py` now provides the local Streamlit dashboard shell and a working Overview; the remaining sections are placeholders while their features are built.
