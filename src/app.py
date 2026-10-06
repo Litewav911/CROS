@@ -1,8 +1,11 @@
+from contextlib import closing
 from decimal import Decimal
+import sqlite3
 
 import pandas as pd
 import streamlit as st
 
+from database import DATABASE_PATH
 from real_retirement_scenario import run_real_retirement_scenario
 from retirement_accounts import RETIREMENT_ACCOUNTS
 from retirement_report import build_retirement_report
@@ -204,6 +207,198 @@ def _show_accounts() -> None:
         st.info("The current projection has no account withdrawals.")
 
 
+def _available_transaction_years(database_path=DATABASE_PATH) -> list[int]:
+    if not database_path.exists():
+        return []
+
+    database_uri = f"file:{database_path.as_posix()}?mode=ro"
+    try:
+        with closing(sqlite3.connect(database_uri, uri=True)) as connection:
+            rows = connection.execute(
+                """
+                SELECT DISTINCT CAST(strftime('%Y', transaction_date) AS INTEGER)
+                FROM transactions
+                WHERE transaction_date IS NOT NULL
+                ORDER BY 1
+                """
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+
+    return [row[0] for row in rows if row[0] is not None]
+
+
+def _transaction_view_data(
+    year: int,
+    month: int,
+    database_path=DATABASE_PATH,
+) -> dict[str, object]:
+    if not database_path.exists():
+        return {
+            "transactions": [],
+            "categories": [],
+            "monthly_spending": Decimal("0"),
+            "monthly_income": Decimal("0"),
+            "annual_spending": Decimal("0"),
+            "annual_income": Decimal("0"),
+        }
+
+    database_uri = f"file:{database_path.as_posix()}?mode=ro"
+    try:
+        with closing(sqlite3.connect(database_uri, uri=True)) as connection:
+            rows = connection.execute(
+                """
+                SELECT
+                    transaction_date,
+                    description,
+                    amount,
+                    COALESCE(category_override, category, 'Uncategorized'),
+                    COALESCE(merchant_override, merchant, ''),
+                    COALESCE(account.name, '—')
+                FROM transactions AS t
+                LEFT JOIN accounts AS account
+                    ON account.id = t.account_id
+                WHERE strftime('%Y', t.transaction_date) = ?
+                ORDER BY t.transaction_date DESC, t.id DESC
+                """,
+                (str(year),),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        rows = []
+
+    transactions = []
+    categories: dict[str, Decimal] = {}
+    monthly_spending = Decimal("0")
+    monthly_income = Decimal("0")
+    annual_spending = Decimal("0")
+    annual_income = Decimal("0")
+
+    for (
+        transaction_date,
+        description,
+        amount,
+        category,
+        merchant,
+        account,
+    ) in rows:
+        amount = Decimal(str(amount or 0))
+        transaction_month = int(transaction_date[5:7])
+        is_selected_month = transaction_month == month
+
+        transactions.append(
+            {
+                "Date": transaction_date,
+                "Description": description or "",
+                "Merchant": merchant,
+                "Account": account,
+                "Category": category,
+                "Amount": amount,
+            }
+        )
+
+        if amount < 0:
+            spending = abs(amount)
+            annual_spending += spending
+            if is_selected_month:
+                monthly_spending += spending
+                categories[category] = (
+                    categories.get(category, Decimal("0")) + spending
+                )
+        elif amount > 0:
+            annual_income += amount
+            if is_selected_month:
+                monthly_income += amount
+
+    monthly_transactions = [
+        transaction
+        for transaction in transactions
+        if int(transaction["Date"][5:7]) == month
+    ]
+
+    return {
+        "transactions": monthly_transactions,
+        "categories": [
+            {"Category": category, "Spending": amount}
+            for category, amount in sorted(categories.items())
+        ],
+        "monthly_spending": monthly_spending,
+        "monthly_income": monthly_income,
+        "annual_spending": annual_spending,
+        "annual_income": annual_income,
+    }
+
+
+def _show_transactions_spending() -> None:
+    st.title("Transactions & spending")
+    st.caption("Review recorded transactions and compare actual spending with plan targets.")
+    st.info(
+        "This view reads the local CROS transaction database. Verify imported "
+        "records before treating them as household data; sample transactions "
+        "are not retirement income assumptions."
+    )
+
+    years = _available_transaction_years()
+    if not years:
+        st.info("No dated transactions are available in the local database.")
+        return
+
+    selected_year = st.selectbox("Year", years, index=len(years) - 1)
+    selected_month = st.selectbox(
+        "Month",
+        range(1, 13),
+        format_func=lambda month: (
+            f"{month:02d} · "
+            f"{('January February March April May June July August September October November December').split()[month - 1]}"
+        ),
+    )
+    data = _transaction_view_data(selected_year, selected_month)
+
+    monthly_plan = _current_plan_assumptions()["monthly_spending_target"]
+    annual_plan = monthly_plan * Decimal("12")
+    monthly_variance = data["monthly_spending"] - monthly_plan
+    annual_variance = data["annual_spending"] - annual_plan
+
+    st.subheader(f"{selected_year} spending summary")
+    metrics = st.columns(4)
+    metrics[0].metric("Month spending", _money(data["monthly_spending"]))
+    metrics[1].metric(
+        "Monthly plan variance",
+        _money(monthly_variance),
+        delta=f"Plan: {_money(monthly_plan)}",
+    )
+    metrics[2].metric("Year spending", _money(data["annual_spending"]))
+    metrics[3].metric(
+        "Annual plan variance",
+        _money(annual_variance),
+        delta=f"Plan: {_money(annual_plan)}",
+    )
+
+    st.caption(
+        f"Selected-month inflows: {_money(data['monthly_income'])} · "
+        f"Annual recorded inflows: {_money(data['annual_income'])}"
+    )
+
+    st.subheader("Selected month by category")
+    if data["categories"]:
+        category_frame = pd.DataFrame(data["categories"]).set_index("Category")
+        st.bar_chart(category_frame, x_label="Category", y_label="Spending ($)")
+    else:
+        st.info("No spending transactions were recorded for this month.")
+
+    st.subheader("Transactions for selected month")
+    if data["transactions"]:
+        st.dataframe(
+            pd.DataFrame(data["transactions"]),
+            hide_index=True,
+            use_container_width=True,
+            column_config={
+                "Amount": st.column_config.NumberColumn(format="$%.2f"),
+            },
+        )
+    else:
+        st.info("No transactions were recorded for this month.")
+
+
 def _show_overview() -> None:
     rows = _overview_rows(_current_plan_assumptions())
     frame = pd.DataFrame(rows)
@@ -353,6 +548,10 @@ def main() -> None:
 
     if section == "Accounts":
         _show_accounts()
+        return
+
+    if section == "Transactions & Spending":
+        _show_transactions_spending()
         return
 
     st.title(section)
