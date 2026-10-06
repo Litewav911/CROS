@@ -2,9 +2,7 @@ from decimal import Decimal
 from dataclasses import dataclass
 
 from tax_engine import (
-    calculate_federal_incremental_tax_mfj_2026,
-    calculate_federal_tax_with_social_security_mfj_2026,
-    calculate_social_security_taxable_benefit_mfj,
+    calculate_federal_tax_with_preferential_income_mfj_2026,
 )
 
 
@@ -37,6 +35,7 @@ def calculate_roth_conversion(
     conversion_amount: Decimal,
     social_security_benefits: Decimal = Decimal("0"),
     provisional_other_income: Decimal | None = None,
+    preferential_income: Decimal = Decimal("0"),
 ):
     """
     Calculate the tax consequences of a Roth conversion.
@@ -80,50 +79,20 @@ def calculate_roth_conversion(
             "Conversion amount cannot be negative."
         )
 
-    # --------------------------------------------------
-    # Federal incremental tax
-    # --------------------------------------------------
-
-    taxable_social_security_before = (
-        calculate_social_security_taxable_benefit_mfj(
+    federal_tax = (
+        calculate_federal_tax_with_preferential_income_mfj_2026(
+            base_taxable_income + conversion_amount,
+            preferential_income,
+            social_security_benefits,
+            provisional_other_income + conversion_amount,
+        )
+        - calculate_federal_tax_with_preferential_income_mfj_2026(
+            base_taxable_income,
+            preferential_income,
             social_security_benefits,
             provisional_other_income,
         )
     )
-
-    taxable_social_security_after = (
-        calculate_social_security_taxable_benefit_mfj(
-            social_security_benefits,
-            provisional_other_income + conversion_amount,
-        )
-    )
-
-    if (
-        taxable_social_security_before
-        == taxable_social_security_after
-    ):
-
-        federal_tax = calculate_federal_incremental_tax_mfj_2026(
-            base_taxable_income
-            + taxable_social_security_before,
-            conversion_amount,
-        )
-
-    else:
-
-        federal_tax = (
-            calculate_federal_tax_with_social_security_mfj_2026(
-                base_taxable_income
-                + conversion_amount,
-                social_security_benefits,
-                provisional_other_income + conversion_amount,
-            )
-            - calculate_federal_tax_with_social_security_mfj_2026(
-                base_taxable_income,
-                social_security_benefits,
-                provisional_other_income,
-            )
-        )
 
     # --------------------------------------------------
     # North Carolina incremental tax

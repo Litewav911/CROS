@@ -9,6 +9,7 @@ from tax_engine import (
     calculate_conversion_tax_mfj_2026,
     calculate_federal_incremental_tax_mfj_2026,
     calculate_federal_tax_mfj_2026,
+    calculate_federal_tax_with_preferential_income_mfj_2026,
     calculate_flat_tax,
     calculate_incremental_tax,
     calculate_nc_incremental_tax,
@@ -77,6 +78,16 @@ def test_progressive_tax_crosses_multiple_brackets():
     )
 
     assert result == expected
+
+
+def test_qualified_dividends_and_long_term_gains_use_preferential_rates():
+    tax = calculate_federal_tax_with_preferential_income_mfj_2026(
+        taxable_income=Decimal("100000"),
+        preferential_income=Decimal("20000"),
+    )
+
+    assert tax == Decimal("9269.00")
+    assert tax < calculate_federal_tax_mfj_2026(Decimal("100000"))
 
 
 def test_flat_tax():

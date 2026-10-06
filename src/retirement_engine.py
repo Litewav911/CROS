@@ -15,7 +15,7 @@ from roth_conversion_integration import (
 )
 from tax_engine import (
     NC_TAX_RATE,
-    calculate_federal_tax_with_social_security_mfj_2026,
+    calculate_federal_tax_with_preferential_income_mfj_2026,
     calculate_flat_tax,
     calculate_social_security_taxable_benefit_mfj,
     calculate_withdrawal_tax_mfj_2026,
@@ -62,6 +62,10 @@ class RetirementEngineConfig:
     )
 
     base_taxable_income_by_year: dict[int, Decimal] = field(
+        default_factory=dict
+    )
+
+    preferential_income_by_year: dict[int, Decimal] = field(
         default_factory=dict
     )
 
@@ -295,9 +299,11 @@ def _base_income_tax(
     nc_taxable_income: Decimal,
     social_security_benefits: Decimal,
     provisional_other_income: Decimal,
+    preferential_income: Decimal = ZERO,
 ) -> Decimal:
-    federal_tax = calculate_federal_tax_with_social_security_mfj_2026(
+    federal_tax = calculate_federal_tax_with_preferential_income_mfj_2026(
         federal_taxable_income,
+        preferential_income,
         social_security_benefits,
         provisional_other_income,
     )
@@ -312,6 +318,7 @@ def _conversion_tax_for_account(
     conversion_amount: Decimal,
     social_security_benefits: Decimal = ZERO,
     provisional_other_income: Decimal | None = None,
+    preferential_income: Decimal = ZERO,
 ) -> Decimal:
     """
     Calculate incremental federal + NC tax for one
@@ -343,6 +350,7 @@ def _conversion_tax_for_account(
         conversion_amount=conversion_amount,
         social_security_benefits=social_security_benefits,
         provisional_other_income=provisional_other_income,
+        preferential_income=preferential_income,
     )
 
     return _to_decimal(
@@ -356,6 +364,7 @@ def _total_conversion_tax(
     roth_conversions: Mapping[str, Decimal],
     social_security_benefits: Decimal = ZERO,
     provisional_other_income: Decimal | None = None,
+    preferential_income: Decimal = ZERO,
 ) -> Decimal:
     """
     Calculate total tax for all requested Roth conversions.
@@ -380,6 +389,7 @@ def _total_conversion_tax(
             conversion_amount=conversion_amount,
             social_security_benefits=social_security_benefits,
             provisional_other_income=provisional_income_so_far,
+            preferential_income=preferential_income,
         )
 
         taxable_income_so_far += conversion_amount
@@ -394,6 +404,7 @@ def _withdrawal_tax(
     withdrawal_amount: Decimal,
     social_security_benefits: Decimal = ZERO,
     provisional_other_income: Decimal | None = None,
+    preferential_income: Decimal = ZERO,
 ) -> Decimal:
     """
     Calculate incremental tax caused by a traditional
@@ -416,6 +427,7 @@ def _withdrawal_tax(
         withdrawal_amount=withdrawal_amount,
         social_security_benefits=social_security_benefits,
         provisional_other_income=provisional_other_income,
+        preferential_income=preferential_income,
     )
 
 
@@ -426,6 +438,7 @@ def _gross_up_tax_deferred_withdrawal(
     maximum_available: Decimal,
     social_security_benefits: Decimal = ZERO,
     provisional_other_income: Decimal | None = None,
+    preferential_income: Decimal = ZERO,
 ) -> tuple[Decimal, Decimal]:
     """
     Find the gross tax-deferred withdrawal required to
@@ -456,6 +469,7 @@ def _gross_up_tax_deferred_withdrawal(
             gross,
             social_security_benefits,
             provisional_other_income,
+            preferential_income,
         )
 
         return (
@@ -569,6 +583,7 @@ def _allocate_withdrawal(
     reserved_for_conversions: Mapping[str, Decimal] | None = None,
     social_security_benefits: Decimal = ZERO,
     provisional_other_income: Decimal | None = None,
+    preferential_income: Decimal = ZERO,
 ) -> tuple[
     dict[str, Decimal],
     Decimal,
@@ -651,6 +666,7 @@ def _allocate_withdrawal(
                         else provisional_other_income
                         + taxable_withdrawals_so_far
                     ),
+                    preferential_income,
                 )
             )
 
@@ -934,6 +950,9 @@ def run_retirement_engine(
                 base_taxable_income,
             )
         )
+        preferential_income = _to_decimal(
+            config.preferential_income_by_year.get(year, ZERO)
+        )
 
         nc_taxable_income = _to_decimal(
             config.nc_taxable_income_by_year.get(
@@ -946,6 +965,7 @@ def run_retirement_engine(
             nc_taxable_income=nc_taxable_income,
             social_security_benefits=social_security,
             provisional_other_income=provisional_other_income,
+            preferential_income=preferential_income,
         )
 
         market_decline = bool(
@@ -981,6 +1001,7 @@ def run_retirement_engine(
             roth_conversions=roth_conversions,
             social_security_benefits=social_security,
             provisional_other_income=provisional_other_income,
+            preferential_income=preferential_income,
         )
 
         cash_need = _portfolio_cash_requirement(
@@ -1008,6 +1029,7 @@ def run_retirement_engine(
             reserved_for_conversions=roth_conversions,
             social_security_benefits=social_security,
             provisional_other_income=provisional_other_income,
+            preferential_income=preferential_income,
         )
 
         projection = project_portfolio_year(

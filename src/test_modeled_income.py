@@ -19,6 +19,8 @@ def test_income_schedules_derive_from_recurring_sources_and_work_dates():
             "taxable_investments": {
                 "annual_interest": Decimal("1000"),
                 "annual_ordinary_dividends": Decimal("2000"),
+                "annual_qualified_dividends": Decimal("800"),
+                "annual_net_long_term_capital_gains": Decimal("5000"),
                 "annual_growth": Decimal("0.05"),
             },
             "rental": {
@@ -45,9 +47,18 @@ def test_income_schedules_derive_from_recurring_sources_and_work_dates():
         2027: salary_2027 + Decimal("28636.09") + Decimal("3000"),
         2028: Decimal("28636.09") + Decimal("3150.00"),
     }
-    assert schedules["federal_taxable_income"][2028] == Decimal("0")
-    assert schedules["nc_taxable_income"][2028] == Decimal("6286.09")
-    assert schedules["provisional_other_income"] == schedules["ordinary_income"]
+    assert schedules["qualified_dividends"] == {
+        2027: Decimal("800"), 2028: Decimal("840.00")
+    }
+    assert schedules["net_long_term_capital_gains"] == {
+        2027: Decimal("5000"), 2028: Decimal("5250.00")
+    }
+    assert schedules["preferential_income"] == {
+        2027: Decimal("5800"), 2028: Decimal("6090.00")
+    }
+    assert schedules["federal_taxable_income"][2028] == Decimal("4836.09")
+    assert schedules["nc_taxable_income"][2028] == Decimal("11536.09")
+    assert schedules["provisional_other_income"][2028] == Decimal("37036.09")
 
 
 def test_employment_income_requires_a_last_work_date():
@@ -67,6 +78,26 @@ def test_employment_income_requires_a_last_work_date():
         )
     else:
         raise AssertionError("A last work date should be required.")
+
+
+def test_qualified_dividends_cannot_exceed_total_ordinary_dividends():
+    try:
+        build_modeled_income_schedules(
+            start_year=2027,
+            end_year=2027,
+            income_assumptions={
+                "taxable_investments": {
+                    "annual_ordinary_dividends": Decimal("100"),
+                    "annual_qualified_dividends": Decimal("101"),
+                }
+            },
+        )
+    except ValueError as error:
+        assert str(error) == (
+            "Qualified dividends cannot exceed total ordinary dividends."
+        )
+    else:
+        raise AssertionError("Qualified dividends must be a subset of dividends.")
 
 
 def test_modeled_income_tax_is_included_in_portfolio_cash_need():

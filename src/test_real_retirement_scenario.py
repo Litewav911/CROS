@@ -58,6 +58,22 @@ def test_real_retirement_config_supplies_provisional_income_schedule():
     }
 
 
+def test_real_retirement_config_supplies_preferential_income_schedule():
+    config = build_real_retirement_config(
+        income_assumptions={
+            "taxable_investments": {
+                "annual_ordinary_dividends": Decimal("20000"),
+                "annual_qualified_dividends": Decimal("10000"),
+                "annual_net_long_term_capital_gains": Decimal("5000"),
+            }
+        }
+    )
+
+    assert config.preferential_income_by_year == {
+        year: Decimal("15000") for year in range(2027, 2041)
+    }
+
+
 def test_real_retirement_config_accepts_plan_assumption_overrides():
 
     config = build_real_retirement_config(

@@ -762,7 +762,7 @@ def _show_overview() -> None:
     st.warning(
         "Tax estimates use the income-source assumptions from Retirement "
         "Plan and Social Security. Rental losses are limited to zero, and "
-        "qualified dividends, capital gains, payroll taxes, and property-"
+        "short-term gains, capital losses, payroll taxes, and property-"
         "specific rental tax limits are not modeled."
     )
 
@@ -905,12 +905,12 @@ def _show_retirement_plan() -> None:
 
         st.markdown("**Taxable investment income**")
         st.caption(
-            "Enter recurring ordinary interest and ordinary dividends. "
-            "They are included in the tax calculation and assumed to remain "
-            "within the portfolio's return, so they are not counted twice as "
-            "spending cash. Qualified dividends and capital gains are not modeled."
+            "Enter recurring taxable interest and total ordinary dividends "
+            "(Form 1099-DIV box 1a). Qualified dividends are a subset of that "
+            "dividend total. Net long-term gains are modeled separately. These "
+            "amounts are assumed reinvested within the portfolio return."
         )
-        investment_columns = st.columns(3)
+        investment_columns = st.columns(5)
         annual_interest = investment_columns[0].number_input(
             "Annual taxable interest ($)",
             min_value=0.0,
@@ -919,7 +919,7 @@ def _show_retirement_plan() -> None:
             key="income_taxable_interest",
         )
         annual_dividends = investment_columns[1].number_input(
-            "Annual ordinary dividends ($)",
+            "Annual total ordinary dividends ($)",
             min_value=0.0,
             value=float(
                 current_income["taxable_investments"]["annual_ordinary_dividends"]
@@ -927,7 +927,29 @@ def _show_retirement_plan() -> None:
             step=100.0,
             key="income_ordinary_dividends",
         )
-        investment_growth_percent = investment_columns[2].number_input(
+        annual_qualified_dividends = investment_columns[2].number_input(
+            "Annual qualified dividends ($)",
+            min_value=0.0,
+            value=float(
+                current_income["taxable_investments"]["annual_qualified_dividends"]
+            ),
+            step=100.0,
+            key="income_qualified_dividends",
+            help="This amount is included in total ordinary dividends above.",
+        )
+        annual_net_long_term_capital_gains = investment_columns[3].number_input(
+            "Annual net long-term capital gains ($)",
+            min_value=0.0,
+            value=float(
+                current_income["taxable_investments"][
+                    "annual_net_long_term_capital_gains"
+                ]
+            ),
+            step=100.0,
+            key="income_long_term_capital_gains",
+            help="Enter estimated positive net realized long-term gains.",
+        )
+        investment_growth_percent = investment_columns[4].number_input(
             "Annual income growth (%)",
             min_value=-100.0,
             value=float(
@@ -968,6 +990,12 @@ def _show_retirement_plan() -> None:
             "taxable_investments": {
                 "annual_interest": Decimal(str(annual_interest)),
                 "annual_ordinary_dividends": Decimal(str(annual_dividends)),
+                "annual_qualified_dividends": Decimal(
+                    str(annual_qualified_dividends)
+                ),
+                "annual_net_long_term_capital_gains": Decimal(
+                    str(annual_net_long_term_capital_gains)
+                ),
                 "annual_growth": (
                     Decimal(str(investment_growth_percent))
                     / Decimal("100")
@@ -1013,6 +1041,12 @@ def _show_retirement_plan() -> None:
                     "Taxable investment income": modeled_income[
                         "taxable_investment_income"
                     ][year],
+                    "Qualified dividends": modeled_income[
+                        "qualified_dividends"
+                    ][year],
+                    "Net long-term capital gains": modeled_income[
+                        "net_long_term_capital_gains"
+                    ][year],
                     "Ordinary income": modeled_income["ordinary_income"][year],
                 }
                 for year in modeled_income["ordinary_income"]
@@ -1026,6 +1060,8 @@ def _show_retirement_plan() -> None:
                 "Employment income",
                 "Net rental cash flow",
                 "Taxable investment income",
+                "Qualified dividends",
+                "Net long-term capital gains",
                 "Ordinary income",
             )
         },

@@ -167,6 +167,12 @@ def build_modeled_income_schedules(
     annual_dividends = Decimal(
         str(investment_assumptions.get("annual_ordinary_dividends", 0))
     )
+    annual_qualified_dividends = Decimal(
+        str(investment_assumptions.get("annual_qualified_dividends", 0))
+    )
+    annual_net_long_term_capital_gains = Decimal(
+        str(investment_assumptions.get("annual_net_long_term_capital_gains", 0))
+    )
     investment_growth = Decimal(
         str(investment_assumptions.get("annual_growth", 0))
     )
@@ -175,11 +181,17 @@ def build_modeled_income_schedules(
         ("Rental depreciation", annual_depreciation),
         ("Taxable interest", annual_interest),
         ("Ordinary dividends", annual_dividends),
+        ("Qualified dividends", annual_qualified_dividends),
+        ("Net long-term capital gains", annual_net_long_term_capital_gains),
     ):
         if amount < 0:
             raise ValueError(f"{name} cannot be negative.")
     if investment_growth < Decimal("-1"):
         raise ValueError("Investment income growth cannot be less than -100%.")
+    if annual_qualified_dividends > annual_dividends:
+        raise ValueError(
+            "Qualified dividends cannot exceed total ordinary dividends."
+        )
 
     rental_cashflow = (
         monthly_rental_cashflow()["net_rental_cashflow"]
@@ -223,35 +235,59 @@ def build_modeled_income_schedules(
     federal_taxable_by_year = {}
     nc_taxable_by_year = {}
     provisional_income_by_year = {}
+    preferential_income_by_year = {}
+    qualified_dividends_by_year = {}
+    capital_gains_by_year = {}
+    total_income_by_year = {}
     rental_by_year = {}
     for year in range(start_year, end_year + 1):
         years_after_start = year - start_year
+        growth_factor = (
+            (Decimal("1") + investment_growth) ** years_after_start
+        )
         taxable_investment_income = (
             (annual_interest + annual_dividends)
-            * (Decimal("1") + investment_growth) ** years_after_start
+            * growth_factor
         )
+        qualified_dividends = annual_qualified_dividends * growth_factor
+        net_long_term_capital_gains = (
+            annual_net_long_term_capital_gains * growth_factor
+        )
+        preferential_income = qualified_dividends + net_long_term_capital_gains
         ordinary_income = (
             employment_by_year[year]
             + rental_taxable_income
             + taxable_investment_income
         )
+        total_income_for_tax = (
+            ordinary_income
+            + net_long_term_capital_gains
+        )
         investment_by_year[year] = taxable_investment_income
+        qualified_dividends_by_year[year] = qualified_dividends
+        capital_gains_by_year[year] = net_long_term_capital_gains
+        preferential_income_by_year[year] = preferential_income
         ordinary_income_by_year[year] = ordinary_income
+        total_income_by_year[year] = total_income_for_tax
         federal_taxable_by_year[year] = max(
-            Decimal("0"), ordinary_income
+            Decimal("0"), total_income_for_tax
             - FEDERAL_STANDARD_DEDUCTION_MFJ_2026
         )
         nc_taxable_by_year[year] = max(
-            Decimal("0"), ordinary_income - NC_MFJ_STANDARD_DEDUCTION
+            Decimal("0"), total_income_for_tax - NC_MFJ_STANDARD_DEDUCTION
         )
-        provisional_income_by_year[year] = ordinary_income
+        provisional_income_by_year[year] = total_income_for_tax
         rental_by_year[year] = rental_cashflow
 
     return {
         "employment_income": employment_by_year,
         "rental_income": rental_by_year,
         "taxable_investment_income": investment_by_year,
+        "qualified_dividends": qualified_dividends_by_year,
+        "net_long_term_capital_gains": capital_gains_by_year,
+        "preferential_income": preferential_income_by_year,
         "ordinary_income": ordinary_income_by_year,
+        "total_income": total_income_by_year,
         "federal_taxable_income": federal_taxable_by_year,
         "nc_taxable_income": nc_taxable_by_year,
         "provisional_other_income": provisional_income_by_year,

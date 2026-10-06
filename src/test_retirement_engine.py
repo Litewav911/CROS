@@ -34,6 +34,33 @@ def test_engine_carries_balances_forward():
     )
 
 
+def test_engine_uses_preferential_income_for_baseline_federal_tax():
+    config = RetirementEngineConfig(
+        start_year=2027,
+        end_year=2027,
+        monthly_spending_target=Decimal("0"),
+        base_taxable_income_by_year={2027: Decimal("100000")},
+        preferential_income_by_year={2027: Decimal("20000")},
+        nc_taxable_income_by_year={2027: Decimal("100000")},
+        initial_balances={},
+    )
+
+    result = run_retirement_engine(config)[0]
+
+    assert result.base_income_tax == Decimal("13259.0000")
+
+
+def test_withdrawal_tax_keeps_preferential_income_in_lower_rate_bands():
+    tax = _withdrawal_tax(
+        base_taxable_income=Decimal("100000"),
+        conversion_amount=Decimal("0"),
+        withdrawal_amount=Decimal("10000"),
+        preferential_income=Decimal("20000"),
+    )
+
+    assert tax == Decimal("3099.0000")
+
+
 def test_engine_uses_chris_401k_under_normal_conditions():
 
     config = RetirementEngineConfig(

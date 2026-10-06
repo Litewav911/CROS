@@ -20,6 +20,8 @@ def default_income_assumptions() -> dict[str, object]:
         "taxable_investments": {
             "annual_interest": Decimal("0"),
             "annual_ordinary_dividends": Decimal("0"),
+            "annual_qualified_dividends": Decimal("0"),
+            "annual_net_long_term_capital_gains": Decimal("0"),
             "annual_growth": Decimal("0"),
         },
         "rental": {
@@ -32,6 +34,10 @@ def default_income_assumptions() -> dict[str, object]:
 def _encode_income_assumptions(
     income_assumptions: dict[str, object],
 ) -> str:
+    taxable_investments = {
+        **default_income_assumptions()["taxable_investments"],
+        **income_assumptions["taxable_investments"],
+    }
     serializable = {
         "employment": {
             name: {
@@ -46,9 +52,7 @@ def _encode_income_assumptions(
         },
         "taxable_investments": {
             key: str(value)
-            for key, value in income_assumptions[
-                "taxable_investments"
-            ].items()
+            for key, value in taxable_investments.items()
         },
         "rental": {
             key: str(value)
@@ -71,6 +75,12 @@ def _decode_income_assumptions(payload: str) -> dict[str, object]:
             key: Decimal(value)
             for key, value in values[assumptions_key].items()
         }
+    values["taxable_investments"].setdefault(
+        "annual_qualified_dividends", Decimal("0")
+    )
+    values["taxable_investments"].setdefault(
+        "annual_net_long_term_capital_gains", Decimal("0")
+    )
     return values
 
 

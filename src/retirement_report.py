@@ -320,6 +320,9 @@ def build_real_retirement_config() -> RetirementEngineConfig:
         base_taxable_income_by_year=(
             income_schedules["federal_taxable_income"]
         ),
+        preferential_income_by_year=(
+            income_schedules["preferential_income"]
+        ),
         nc_taxable_income_by_year=(
             income_schedules["nc_taxable_income"]
         ),
