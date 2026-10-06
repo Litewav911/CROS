@@ -14,6 +14,10 @@ from roth_conversion_integration import (
     calculate_roth_conversion,
 )
 from tax_engine import (
+    NC_TAX_RATE,
+    calculate_federal_tax_with_social_security_mfj_2026,
+    calculate_flat_tax,
+    calculate_social_security_taxable_benefit_mfj,
     calculate_withdrawal_tax_mfj_2026,
 )
 
@@ -45,6 +49,10 @@ class RetirementEngineConfig:
         default_factory=dict
     )
 
+    employment_income_by_year: dict[int, Decimal] = field(
+        default_factory=dict
+    )
+
     social_security_by_year: dict[int, Decimal] = field(
         default_factory=dict
     )
@@ -54,6 +62,10 @@ class RetirementEngineConfig:
     )
 
     base_taxable_income_by_year: dict[int, Decimal] = field(
+        default_factory=dict
+    )
+
+    nc_taxable_income_by_year: dict[int, Decimal] = field(
         default_factory=dict
     )
 
@@ -96,6 +108,8 @@ class RetirementYearResult:
 
     transaction_income: Decimal
 
+    employment_income: Decimal
+
     rental_income: Decimal
 
     social_security: Decimal
@@ -107,6 +121,8 @@ class RetirementYearResult:
     conversion_amount: Decimal
 
     conversion_tax: Decimal
+
+    base_income_tax: Decimal
 
     cash_need_before_withdrawal: Decimal
 
@@ -207,13 +223,17 @@ def _default_rental_income(
 def _get_year_income(
     config: RetirementEngineConfig,
     year: int,
-) -> tuple[Decimal, Decimal, Decimal]:
+) -> tuple[Decimal, Decimal, Decimal, Decimal]:
 
     transaction_income = _to_decimal(
         config.transaction_income_by_year.get(
             year,
             ZERO,
         )
+    )
+
+    employment_income = _to_decimal(
+        config.employment_income_by_year.get(year, ZERO)
     )
 
     if year in config.rental_income_by_year:
@@ -237,6 +257,7 @@ def _get_year_income(
 
     return (
         transaction_income,
+        employment_income,
         rental_income,
         social_security,
     )
@@ -267,6 +288,21 @@ def _social_security_other_income(
             base_taxable_income,
         )
     )
+
+
+def _base_income_tax(
+    federal_taxable_income: Decimal,
+    nc_taxable_income: Decimal,
+    social_security_benefits: Decimal,
+    provisional_other_income: Decimal,
+) -> Decimal:
+    federal_tax = calculate_federal_tax_with_social_security_mfj_2026(
+        federal_taxable_income,
+        social_security_benefits,
+        provisional_other_income,
+    )
+    nc_tax = calculate_flat_tax(nc_taxable_income, NC_TAX_RATE)
+    return federal_tax + nc_tax
 
 
 def _conversion_tax_for_account(
@@ -742,6 +778,7 @@ def _portfolio_cash_requirement(
     outside_income: Decimal,
     conversion_tax: Decimal,
     conversion_tax_funded_from_withdrawal: bool,
+    base_income_tax: Decimal = ZERO,
 ) -> Decimal:
     """
     Determine the portfolio withdrawal requirement.
@@ -751,6 +788,7 @@ def _portfolio_cash_requirement(
         portfolio cash need =
             planned spending
             - outside income
+            + tax on modeled income
             + conversion tax
 
     The result cannot be less than zero.
@@ -768,6 +806,8 @@ def _portfolio_cash_requirement(
         conversion_tax
     )
 
+    base_income_tax = _to_decimal(base_income_tax)
+
     spending_need = max(
         ZERO,
         planned_spending
@@ -783,6 +823,7 @@ def _portfolio_cash_requirement(
     return max(
         ZERO,
         spending_need
+        + base_income_tax
         + tax_need,
     )
 
@@ -799,8 +840,9 @@ def run_retirement_engine(
     Outside income reduces the portfolio-funded spending
     requirement.
 
-    Roth conversion tax is added to the portfolio cash need
-    only when conversion_tax_funded_from_withdrawal is enabled.
+    Tax on modeled ordinary income is included in the portfolio cash
+    need. Roth conversion tax is added only when
+    conversion_tax_funded_from_withdrawal is enabled.
     """
 
     if config.start_year > config.end_year:
@@ -857,6 +899,7 @@ def run_retirement_engine(
 
         (
             transaction_income,
+            employment_income,
             rental_income,
             social_security,
         ) = _get_year_income(
@@ -866,6 +909,7 @@ def run_retirement_engine(
 
         outside_income = (
             transaction_income
+            + employment_income
             + rental_income
             + social_security
         )
@@ -889,6 +933,19 @@ def run_retirement_engine(
                 year,
                 base_taxable_income,
             )
+        )
+
+        nc_taxable_income = _to_decimal(
+            config.nc_taxable_income_by_year.get(
+                year,
+                base_taxable_income,
+            )
+        )
+        base_income_tax = _base_income_tax(
+            federal_taxable_income=base_taxable_income,
+            nc_taxable_income=nc_taxable_income,
+            social_security_benefits=social_security,
+            provisional_other_income=provisional_other_income,
         )
 
         market_decline = bool(
@@ -933,6 +990,7 @@ def run_retirement_engine(
             conversion_tax_funded_from_withdrawal=(
                 config.conversion_tax_funded_from_withdrawal
             ),
+            base_income_tax=base_income_tax,
         )
 
         (
@@ -972,12 +1030,14 @@ def run_retirement_engine(
                 beginning_balances=beginning_balances,
                 planned_spending=planned_spending,
                 transaction_income=transaction_income,
+                employment_income=employment_income,
                 rental_income=rental_income,
                 social_security=social_security,
                 outside_income=outside_income,
                 net_spending_need=net_spending_need,
                 conversion_amount=actual_conversion_amount,
                 conversion_tax=conversion_tax,
+                base_income_tax=base_income_tax,
                 cash_need_before_withdrawal=cash_need,
                 gross_withdrawal=gross_withdrawal,
                 withdrawal_tax=withdrawal_tax,
@@ -1013,6 +1073,7 @@ def print_retirement_engine(
         f"{'Year':<8}"
         f"{'Spending':>15}"
         f"{'Outside Income':>17}"
+        f"{'Income Tax':>15}"
         f"{'Cash Need':>15}"
         f"{'Withdrawal':>15}"
         f"{'Withdrawal Tax':>16}"
@@ -1029,6 +1090,7 @@ def print_retirement_engine(
             f"{result.year:<8}"
             f"${result.planned_spending:>13,.2f}"
             f"${result.outside_income:>15,.2f}"
+            f"${result.base_income_tax:>13,.2f}"
             f"${result.cash_need_before_withdrawal:>13,.2f}"
             f"${result.gross_withdrawal:>13,.2f}"
             f"${result.withdrawal_tax:>14,.2f}"

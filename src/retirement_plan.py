@@ -3,6 +3,10 @@ from decimal import Decimal
 from datetime import date
 
 from rental_cashflow import monthly_rental_cashflow
+from tax_engine import (
+    FEDERAL_STANDARD_DEDUCTION_MFJ_2026,
+    NC_MFJ_STANDARD_DEDUCTION,
+)
 
 
 @dataclass
@@ -123,16 +127,16 @@ def build_roth_conversion_schedule(
     }
 
 
-def build_base_taxable_income_schedule(
+def build_modeled_income_schedules(
     start_year: int | None = None,
     end_year: int | None = None,
-) -> dict[int, Decimal]:
+    income_assumptions: dict[str, object] | None = None,
+) -> dict[str, dict[int, Decimal]]:
     """
-    Build the modeled ordinary-income schedule from rental cash flow.
+    Build income and taxable-income schedules from modeled sources.
 
-    Net rental cash flow estimates rental taxable income until the
-    model includes depreciation and other rental tax adjustments.
-    Transaction inflows are intentionally excluded.
+    Income source amounts are recurring assumptions rather than
+    year-by-year taxable-income inputs. Transaction inflows are excluded.
     """
 
     if start_year is None:
@@ -146,33 +150,112 @@ def build_base_taxable_income_schedule(
             "start_year cannot be greater than end_year."
         )
 
-    annual_rental_income = (
+    assumptions = income_assumptions or {}
+    rental_assumptions = assumptions.get("rental", {})
+    investment_assumptions = assumptions.get("taxable_investments", {})
+    employment_assumptions = assumptions.get("employment", {})
+
+    extra_rental_expenses = Decimal(
+        str(rental_assumptions.get("annual_other_expenses", 0))
+    )
+    annual_depreciation = Decimal(
+        str(rental_assumptions.get("annual_depreciation", 0))
+    )
+    annual_interest = Decimal(
+        str(investment_assumptions.get("annual_interest", 0))
+    )
+    annual_dividends = Decimal(
+        str(investment_assumptions.get("annual_ordinary_dividends", 0))
+    )
+    investment_growth = Decimal(
+        str(investment_assumptions.get("annual_growth", 0))
+    )
+    for name, amount in (
+        ("Rental expenses", extra_rental_expenses),
+        ("Rental depreciation", annual_depreciation),
+        ("Taxable interest", annual_interest),
+        ("Ordinary dividends", annual_dividends),
+    ):
+        if amount < 0:
+            raise ValueError(f"{name} cannot be negative.")
+    if investment_growth < Decimal("-1"):
+        raise ValueError("Investment income growth cannot be less than -100%.")
+
+    rental_cashflow = (
         monthly_rental_cashflow()["net_rental_cashflow"]
         * Decimal("12")
+        - extra_rental_expenses
     )
-    return {
-        year: annual_rental_income
-        for year in range(start_year, end_year + 1)
+    rental_taxable_income = max(
+        Decimal("0"), rental_cashflow - annual_depreciation
+    )
+
+    employment_by_year = {
+        year: Decimal("0") for year in range(start_year, end_year + 1)
     }
+    for source in employment_assumptions.values():
+        annual_salary = Decimal(str(source.get("annual_salary", 0)))
+        last_work_date = source.get("last_work_date")
+        if annual_salary < 0:
+            raise ValueError("Annual employment income cannot be negative.")
+        if annual_salary and last_work_date is None:
+            raise ValueError(
+                "Enter a last work date when annual employment income is provided."
+            )
+        if isinstance(last_work_date, str):
+            last_work_date = date.fromisoformat(last_work_date)
+        if not annual_salary or last_work_date is None:
+            continue
+        for year in range(start_year, end_year + 1):
+            year_start = date(year, 1, 1)
+            year_end = date(year, 12, 31)
+            if last_work_date < year_start:
+                continue
+            paid_through = min(last_work_date, year_end)
+            paid_days = (paid_through - year_start).days + 1
+            year_days = (year_end - year_start).days + 1
+            employment_by_year[year] += (
+                annual_salary * Decimal(paid_days) / Decimal(year_days)
+            )
 
+    investment_by_year = {}
+    ordinary_income_by_year = {}
+    federal_taxable_by_year = {}
+    nc_taxable_by_year = {}
+    provisional_income_by_year = {}
+    rental_by_year = {}
+    for year in range(start_year, end_year + 1):
+        years_after_start = year - start_year
+        taxable_investment_income = (
+            (annual_interest + annual_dividends)
+            * (Decimal("1") + investment_growth) ** years_after_start
+        )
+        ordinary_income = (
+            employment_by_year[year]
+            + rental_taxable_income
+            + taxable_investment_income
+        )
+        investment_by_year[year] = taxable_investment_income
+        ordinary_income_by_year[year] = ordinary_income
+        federal_taxable_by_year[year] = max(
+            Decimal("0"), ordinary_income
+            - FEDERAL_STANDARD_DEDUCTION_MFJ_2026
+        )
+        nc_taxable_by_year[year] = max(
+            Decimal("0"), ordinary_income - NC_MFJ_STANDARD_DEDUCTION
+        )
+        provisional_income_by_year[year] = ordinary_income
+        rental_by_year[year] = rental_cashflow
 
-def build_social_security_other_income_schedule(
-    start_year: int | None = None,
-    end_year: int | None = None,
-) -> dict[int, Decimal]:
-    """Build the non-Social-Security income used for provisional income.
-
-    Use modeled rental income and the confirmed zero tax-exempt
-    interest assumption. Tax-deferred withdrawals and conversions are
-    added by the retirement engine for provisional-income calculations.
-    """
-
-    base_income = build_base_taxable_income_schedule(
-        start_year=start_year,
-        end_year=end_year,
-    )
-
-    return dict(base_income)
+    return {
+        "employment_income": employment_by_year,
+        "rental_income": rental_by_year,
+        "taxable_investment_income": investment_by_year,
+        "ordinary_income": ordinary_income_by_year,
+        "federal_taxable_income": federal_taxable_by_year,
+        "nc_taxable_income": nc_taxable_by_year,
+        "provisional_other_income": provisional_income_by_year,
+    }
 
 
 def build_social_security_benefit_schedule(

@@ -8,10 +8,9 @@ from retirement_engine import (
 
 from retirement_plan import (
     PLAN,
-    build_base_taxable_income_schedule,
+    build_modeled_income_schedules,
     build_roth_conversion_schedule,
     build_social_security_benefit_schedule,
-    build_social_security_other_income_schedule,
 )
 
 
@@ -38,6 +37,7 @@ def build_real_retirement_config(
     annual_return_assumption: Decimal | None = None,
     annual_roth_conversion_target: Decimal | None = None,
     social_security_by_year: dict[int, Decimal] | None = None,
+    income_assumptions: dict[str, object] | None = None,
 ) -> RetirementEngineConfig:
     """
     Build the current real-plan configuration.
@@ -52,6 +52,12 @@ def build_real_retirement_config(
     that is the behavior currently established by the tested
     retirement engine.
     """
+
+    income_schedules = build_modeled_income_schedules(
+        start_year=START_YEAR,
+        end_year=END_YEAR,
+        income_assumptions=income_assumptions,
+    )
 
     return RetirementEngineConfig(
         start_year=START_YEAR,
@@ -69,6 +75,10 @@ def build_real_retirement_config(
         retirement_start=PLAN.retirement_start,
         prorate_first_retirement_year=True,
         initial_balances=STARTING_BALANCES.copy(),
+        employment_income_by_year=(
+            income_schedules["employment_income"]
+        ),
+        rental_income_by_year=(income_schedules["rental_income"]),
         social_security_by_year=(
             social_security_by_year
             if social_security_by_year is not None
@@ -77,16 +87,13 @@ def build_real_retirement_config(
             )
         ),
         base_taxable_income_by_year=(
-            build_base_taxable_income_schedule(
-                start_year=START_YEAR,
-                end_year=END_YEAR,
-            )
+            income_schedules["federal_taxable_income"]
+        ),
+        nc_taxable_income_by_year=(
+            income_schedules["nc_taxable_income"]
         ),
         social_security_other_income_by_year=(
-            build_social_security_other_income_schedule(
-                start_year=START_YEAR,
-                end_year=END_YEAR,
-            )
+            income_schedules["provisional_other_income"]
         ),
         roth_conversions_by_year=(
             build_roth_conversion_schedule(
@@ -106,6 +113,7 @@ def run_real_retirement_scenario(
     annual_return_assumption: Decimal | None = None,
     annual_roth_conversion_target: Decimal | None = None,
     social_security_by_year: dict[int, Decimal] | None = None,
+    income_assumptions: dict[str, object] | None = None,
 ) -> list[RetirementYearResult]:
     """
     Run the current real 2027-2040 retirement scenario.
@@ -116,6 +124,7 @@ def run_real_retirement_scenario(
         annual_return_assumption=annual_return_assumption,
         annual_roth_conversion_target=annual_roth_conversion_target,
         social_security_by_year=social_security_by_year,
+        income_assumptions=income_assumptions,
     )
 
     return run_retirement_engine(
@@ -145,6 +154,7 @@ def _outside_income(
 
     return (
         result.transaction_income
+        + result.employment_income
         + result.rental_income
         + result.social_security
     )
@@ -183,6 +193,7 @@ def _print_year(
         f"{result.year:<8}"
         f"{_money(result.planned_spending):>15}"
         f"{_money(outside_income):>18}"
+        f"{_money(result.base_income_tax):>15}"
         f"{_money(result.cash_need_before_withdrawal):>15}"
         f"{_money(result.gross_withdrawal):>15}"
         f"{_money(result.withdrawal_tax):>16}"
@@ -291,6 +302,11 @@ def _print_totals(
         Decimal("0"),
     )
 
+    total_base_income_tax = sum(
+        (result.base_income_tax for result in results),
+        Decimal("0"),
+    )
+
     total_conversions = sum(
         (
             result.conversion_amount
@@ -323,6 +339,11 @@ def _print_totals(
     print(
         f"Total outside income: "
         f"{_money(total_outside_income)}"
+    )
+
+    print(
+        f"Total income tax: "
+        f"{_money(total_base_income_tax)}"
     )
 
     print(
@@ -360,7 +381,7 @@ def print_real_retirement_scenario(
 
     print()
     print("CROS REAL RETIREMENT SCENARIO")
-    print("=" * 175)
+    print("=" * 190)
 
     print(
         f"Retirement start: "
@@ -383,8 +404,8 @@ def print_real_retirement_scenario(
     )
 
     print(
-        "Modeled ordinary income (net rental cash flow): "
-        f"{_money(build_base_taxable_income_schedule()[START_YEAR])}"
+        "Modeled ordinary income (starting year): "
+        f"{_money(build_modeled_income_schedules()['ordinary_income'][START_YEAR])}"
     )
 
     print(
@@ -398,6 +419,7 @@ def print_real_retirement_scenario(
         f"{'Year':<8}"
         f"{'Spending':>15}"
         f"{'Outside Income':>18}"
+        f"{'Income Tax':>15}"
         f"{'Cash Need':>15}"
         f"{'Withdrawal':>15}"
         f"{'Withdrawal Tax':>16}"
@@ -406,7 +428,7 @@ def print_real_retirement_scenario(
         f"{'Ending Portfolio':>20}"
     )
 
-    print("-" * 175)
+    print("-" * 190)
 
     for result in results:
 

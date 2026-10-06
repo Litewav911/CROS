@@ -9,10 +9,9 @@ from retirement_engine import (
 
 from retirement_plan import (
     PLAN,
-    build_base_taxable_income_schedule,
+    build_modeled_income_schedules,
     build_roth_conversion_schedule,
     build_social_security_benefit_schedule,
-    build_social_security_other_income_schedule,
 )
 
 
@@ -29,6 +28,7 @@ class RetirementReportRow:
     beginning_portfolio: Decimal
     planned_spending: Decimal
     total_income: Decimal
+    base_income_tax: Decimal
     gross_withdrawal: Decimal
     withdrawal_tax: Decimal
     net_withdrawal: Decimal
@@ -57,6 +57,7 @@ def build_retirement_report(
 
         total_income = (
             result.transaction_income
+            + result.employment_income
             + result.rental_income
             + result.social_security
         )
@@ -72,6 +73,7 @@ def build_retirement_report(
                 beginning_portfolio=result.beginning_total,
                 planned_spending=result.planned_spending,
                 total_income=total_income,
+                base_income_tax=result.base_income_tax,
                 gross_withdrawal=result.gross_withdrawal,
                 withdrawal_tax=result.withdrawal_tax,
                 net_withdrawal=net_withdrawal,
@@ -108,6 +110,7 @@ def print_retirement_report(
         f"{'Beginning':>17}"
         f"{'Spending':>15}"
         f"{'Income':>15}"
+        f"{'Income Tax':>15}"
         f"{'Withdrawal':>17}"
         f"{'W/D Tax':>15}"
         f"{'Roth Conv.':>17}"
@@ -125,6 +128,7 @@ def print_retirement_report(
             f"${row.beginning_portfolio:>15,.2f}"
             f"${row.planned_spending:>13,.2f}"
             f"${row.total_income:>13,.2f}"
+            f"${row.base_income_tax:>13,.2f}"
             f"${row.gross_withdrawal:>15,.2f}"
             f"${row.withdrawal_tax:>13,.2f}"
             f"${row.roth_conversion:>15,.2f}"
@@ -191,6 +195,11 @@ def print_retirement_report(
             Decimal("0"),
         )
 
+        total_base_income_tax = sum(
+            (row.base_income_tax for row in rows),
+            Decimal("0"),
+        )
+
         total_conversions = sum(
             (
                 row.roth_conversion
@@ -240,6 +249,11 @@ def print_retirement_report(
         )
 
         print(
+            f"Total income tax:     "
+            f"${total_base_income_tax:,.2f}"
+        )
+
+        print(
             f"Total gross withdrawals: "
             f"${total_withdrawals:,.2f}"
         )
@@ -281,6 +295,10 @@ def build_real_retirement_config() -> RetirementEngineConfig:
 
     start_year = PLAN.retirement_start.year
     end_year = PLAN.retirement_end_year
+    income_schedules = build_modeled_income_schedules(
+        start_year=start_year,
+        end_year=end_year,
+    )
 
     return RetirementEngineConfig(
         start_year=start_year,
@@ -289,6 +307,10 @@ def build_real_retirement_config() -> RetirementEngineConfig:
         monthly_spending_target=PLAN.monthly_spending_target,
         retirement_start=PLAN.retirement_start,
         prorate_first_retirement_year=True,
+        employment_income_by_year=(
+            income_schedules["employment_income"]
+        ),
+        rental_income_by_year=(income_schedules["rental_income"]),
         social_security_by_year=(
             build_social_security_benefit_schedule(
                 start_year=start_year,
@@ -296,16 +318,13 @@ def build_real_retirement_config() -> RetirementEngineConfig:
             )
         ),
         base_taxable_income_by_year=(
-            build_base_taxable_income_schedule(
-                start_year=start_year,
-                end_year=end_year,
-            )
+            income_schedules["federal_taxable_income"]
+        ),
+        nc_taxable_income_by_year=(
+            income_schedules["nc_taxable_income"]
         ),
         social_security_other_income_by_year=(
-            build_social_security_other_income_schedule(
-                start_year=start_year,
-                end_year=end_year,
-            )
+            income_schedules["provisional_other_income"]
         ),
         roth_conversions_by_year=(
             build_roth_conversion_schedule(

@@ -1,4 +1,5 @@
 from contextlib import closing
+from datetime import date
 from decimal import Decimal
 import hashlib
 import sqlite3
@@ -15,7 +16,11 @@ from import_csv import import_csv, parse_csv_content
 from real_retirement_scenario import run_real_retirement_scenario
 from retirement_accounts import RETIREMENT_ACCOUNTS
 from retirement_report import build_retirement_report
-from retirement_plan import PLAN, build_social_security_benefit_schedule
+from retirement_plan import (
+    PLAN,
+    build_modeled_income_schedules,
+    build_social_security_benefit_schedule,
+)
 from transaction_service import update_category_override
 
 
@@ -81,6 +86,34 @@ def _current_social_security_schedule() -> dict[int, Decimal]:
     )
 
 
+def _default_income_assumptions() -> dict[str, object]:
+    return {
+        "employment": {
+            name: {
+                "annual_salary": Decimal("0"),
+                "last_work_date": None,
+            }
+            for name in ("Chris", "Stephanie")
+        },
+        "taxable_investments": {
+            "annual_interest": Decimal("0"),
+            "annual_ordinary_dividends": Decimal("0"),
+            "annual_growth": Decimal("0"),
+        },
+        "rental": {
+            "annual_other_expenses": Decimal("0"),
+            "annual_depreciation": Decimal("0"),
+        },
+    }
+
+
+def _current_income_assumptions() -> dict[str, object]:
+    return st.session_state.get(
+        "income_assumptions",
+        _default_income_assumptions(),
+    )
+
+
 def _overview_rows(
     plan_assumptions: dict[str, Decimal] | None = None,
 ) -> list[dict[str, object]]:
@@ -98,6 +131,7 @@ def _overview_rows(
             plan_assumptions["annual_roth_conversion_target"]
         ),
         social_security_by_year=_current_social_security_schedule(),
+        income_assumptions=_current_income_assumptions(),
     )
     report = build_retirement_report(results)
 
@@ -107,6 +141,7 @@ def _overview_rows(
             "Beginning portfolio": row.beginning_portfolio,
             "Spending": row.planned_spending,
             "Outside income": row.total_income,
+            "Income tax": row.base_income_tax,
             "Gross withdrawal": row.gross_withdrawal,
             "Withdrawal tax": row.withdrawal_tax,
             "Roth conversion": row.roth_conversion,
@@ -144,6 +179,7 @@ def _account_view_data(
             plan_assumptions["annual_roth_conversion_target"]
         ),
         social_security_by_year=_current_social_security_schedule(),
+        income_assumptions=_current_income_assumptions(),
     )
     if not results:
         return [], [], []
@@ -724,8 +760,13 @@ def _show_overview() -> None:
 
     first = rows[0]
     last = rows[-1]
-    total_withdrawal_tax = sum(
-        (row["Withdrawal tax"] for row in rows),
+    total_taxes = sum(
+        (
+            row["Income tax"]
+            + row["Withdrawal tax"]
+            + row["Conversion tax"]
+            for row in rows
+        ),
         Decimal("0"),
     )
     total_withdrawals = sum(
@@ -737,10 +778,10 @@ def _show_overview() -> None:
     st.caption("CROS projection · 2027–2040")
 
     st.warning(
-        "Tax estimates use modeled net rental cash flow as ordinary income. "
-        "Rental depreciation and other tax adjustments, employment income, "
-        "and taxable investment income are not modeled yet. Social Security "
-        "benefits come from the Social Security claimant inputs."
+        "Tax estimates use the income-source assumptions from Retirement "
+        "Plan and Social Security. Rental losses are limited to zero, and "
+        "qualified dividends, capital gains, payroll taxes, and property-"
+        "specific rental tax limits are not modeled."
     )
 
     metrics = st.columns(4)
@@ -757,8 +798,8 @@ def _show_overview() -> None:
         _money(total_withdrawals),
     )
     metrics[3].metric(
-        "Projected withdrawal taxes",
-        _money(total_withdrawal_tax),
+        "Projected taxes",
+        _money(total_taxes),
     )
 
     st.subheader("Portfolio projection")
@@ -775,6 +816,7 @@ def _show_overview() -> None:
         column_config={
             "Spending": st.column_config.NumberColumn(format="$%.2f"),
             "Outside income": st.column_config.NumberColumn(format="$%.2f"),
+            "Income tax": st.column_config.NumberColumn(format="$%.2f"),
             "Gross withdrawal": st.column_config.NumberColumn(format="$%.2f"),
             "Withdrawal tax": st.column_config.NumberColumn(format="$%.2f"),
             "Roth conversion": st.column_config.NumberColumn(format="$%.2f"),
@@ -845,6 +887,162 @@ def _show_retirement_plan() -> None:
         st.success(
             "Plan settings applied. Select Overview to see the updated projection."
         )
+
+    st.subheader("Income assumptions")
+    st.caption(
+        "Enter recurring income sources and dates. CROS derives each year's "
+        "income and tax base; imported transaction inflows are not used."
+    )
+    current_income = _current_income_assumptions()
+    with st.form("modeled_income_assumptions"):
+        employment = {}
+        employment_columns = st.columns(2)
+        for column, name in zip(employment_columns, ("Chris", "Stephanie")):
+            current = current_income["employment"][name]
+            with column:
+                st.markdown(f"**{name} employment**")
+                annual_salary = st.number_input(
+                    "Annual gross salary ($)",
+                    min_value=0.0,
+                    value=float(current["annual_salary"]),
+                    step=1000.0,
+                    key=f"income_salary_{name}",
+                )
+                last_work_date = st.date_input(
+                    "Last day employed",
+                    value=current["last_work_date"],
+                    min_value=date(1900, 1, 1),
+                    max_value=date(2100, 12, 31),
+                    key=f"income_last_work_date_{name}",
+                    help="Leave blank when this person has no modeled employment income.",
+                )
+                employment[name] = {
+                    "annual_salary": Decimal(str(annual_salary)),
+                    "last_work_date": last_work_date,
+                }
+
+        st.markdown("**Taxable investment income**")
+        st.caption(
+            "Enter recurring ordinary interest and ordinary dividends. "
+            "They are included in the tax calculation and assumed to remain "
+            "within the portfolio's return, so they are not counted twice as "
+            "spending cash. Qualified dividends and capital gains are not modeled."
+        )
+        investment_columns = st.columns(3)
+        annual_interest = investment_columns[0].number_input(
+            "Annual taxable interest ($)",
+            min_value=0.0,
+            value=float(current_income["taxable_investments"]["annual_interest"]),
+            step=100.0,
+            key="income_taxable_interest",
+        )
+        annual_dividends = investment_columns[1].number_input(
+            "Annual ordinary dividends ($)",
+            min_value=0.0,
+            value=float(
+                current_income["taxable_investments"]["annual_ordinary_dividends"]
+            ),
+            step=100.0,
+            key="income_ordinary_dividends",
+        )
+        investment_growth_percent = investment_columns[2].number_input(
+            "Annual income growth (%)",
+            min_value=-100.0,
+            value=float(
+                current_income["taxable_investments"]["annual_growth"]
+                * 100
+            ),
+            step=0.25,
+            key="income_investment_growth",
+        )
+
+        st.markdown("**Rental tax adjustments**")
+        st.caption(
+            "Property taxes and insurance are already included in the rental "
+            "cash flow. Enter additional annual deductible expenses and "
+            "noncash depreciation for all modeled properties."
+        )
+        rental_columns = st.columns(2)
+        annual_rental_expenses = rental_columns[0].number_input(
+            "Additional annual rental expenses ($)",
+            min_value=0.0,
+            value=float(current_income["rental"]["annual_other_expenses"]),
+            step=100.0,
+            key="income_rental_expenses",
+        )
+        annual_depreciation = rental_columns[1].number_input(
+            "Annual rental depreciation ($)",
+            min_value=0.0,
+            value=float(current_income["rental"]["annual_depreciation"]),
+            step=100.0,
+            key="income_rental_depreciation",
+        )
+
+        submitted = st.form_submit_button("Apply income assumptions")
+
+    if submitted:
+        income_assumptions = {
+            "employment": employment,
+            "taxable_investments": {
+                "annual_interest": Decimal(str(annual_interest)),
+                "annual_ordinary_dividends": Decimal(str(annual_dividends)),
+                "annual_growth": (
+                    Decimal(str(investment_growth_percent))
+                    / Decimal("100")
+                ),
+            },
+            "rental": {
+                "annual_other_expenses": Decimal(
+                    str(annual_rental_expenses)
+                ),
+                "annual_depreciation": Decimal(
+                    str(annual_depreciation)
+                ),
+            },
+        }
+        try:
+            build_modeled_income_schedules(
+                income_assumptions=income_assumptions
+            )
+        except (TypeError, ValueError) as error:
+            st.error(str(error))
+        else:
+            st.session_state["income_assumptions"] = income_assumptions
+            st.success(
+                "Income assumptions applied to the projection."
+            )
+
+    modeled_income = build_modeled_income_schedules(
+        income_assumptions=_current_income_assumptions()
+    )
+    st.subheader("Derived annual income and tax base")
+    st.dataframe(
+        pd.DataFrame(
+            [
+                {
+                    "Year": year,
+                    "Employment income": modeled_income["employment_income"][year],
+                    "Net rental cash flow": modeled_income["rental_income"][year],
+                    "Taxable investment income": modeled_income[
+                        "taxable_investment_income"
+                    ][year],
+                    "Ordinary income": modeled_income["ordinary_income"][year],
+                }
+                for year in modeled_income["ordinary_income"]
+            ]
+        ),
+        hide_index=True,
+        width="stretch",
+        column_config={
+            column: st.column_config.NumberColumn(format="$%.2f")
+            for column in (
+                "Employment income",
+                "Net rental cash flow",
+                "Taxable investment income",
+                "Ordinary income",
+            )
+        },
+    )
 
 
 def _show_social_security() -> None:

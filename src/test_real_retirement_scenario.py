@@ -73,7 +73,11 @@ def test_real_retirement_config_accepts_plan_assumption_overrides():
         for year in range(2027, 2041)
     }
     assert config.base_taxable_income_by_year == {
-        year: Decimal("34636.09")
+        year: Decimal("2436.09")
+        for year in range(2027, 2041)
+    }
+    assert config.nc_taxable_income_by_year == {
+        year: Decimal("9136.09")
         for year in range(2027, 2041)
     }
     assert config.social_security_by_year == {
@@ -228,7 +232,7 @@ def test_real_retirement_scenario_ending_portfolio_matches_baseline():
 
     assert (
         money(final_result.ending_total)
-        == Decimal("284465.52")
+        == Decimal("327985.32")
     )
 
 
@@ -252,7 +256,7 @@ def test_real_retirement_scenario_ends_with_expected_account_balances():
 
     assert money(
         final_balances["Roth IRA"]
-    ) == Decimal("241968.27")
+    ) == Decimal("285488.07")
 
     assert money(
         final_balances["HSA"]
