@@ -12,6 +12,10 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from database import DATABASE_PATH
 from categorization import categorize_with_rules, load_category_rules
+from income_assumptions_store import (
+    load_income_assumptions,
+    save_income_assumptions,
+)
 from import_csv import import_csv, parse_csv_content
 from real_retirement_scenario import run_real_retirement_scenario
 from retirement_accounts import RETIREMENT_ACCOUNTS
@@ -86,32 +90,10 @@ def _current_social_security_schedule() -> dict[int, Decimal]:
     )
 
 
-def _default_income_assumptions() -> dict[str, object]:
-    return {
-        "employment": {
-            name: {
-                "annual_salary": Decimal("0"),
-                "last_work_date": None,
-            }
-            for name in ("Chris", "Stephanie")
-        },
-        "taxable_investments": {
-            "annual_interest": Decimal("0"),
-            "annual_ordinary_dividends": Decimal("0"),
-            "annual_growth": Decimal("0"),
-        },
-        "rental": {
-            "annual_other_expenses": Decimal("0"),
-            "annual_depreciation": Decimal("0"),
-        },
-    }
-
-
 def _current_income_assumptions() -> dict[str, object]:
-    return st.session_state.get(
-        "income_assumptions",
-        _default_income_assumptions(),
-    )
+    if "income_assumptions" not in st.session_state:
+        st.session_state["income_assumptions"] = load_income_assumptions()
+    return st.session_state["income_assumptions"]
 
 
 def _overview_rows(
@@ -1007,10 +989,15 @@ def _show_retirement_plan() -> None:
         except (TypeError, ValueError) as error:
             st.error(str(error))
         else:
-            st.session_state["income_assumptions"] = income_assumptions
-            st.success(
-                "Income assumptions applied to the projection."
-            )
+            try:
+                save_income_assumptions(income_assumptions)
+            except (OSError, sqlite3.Error) as error:
+                st.error(f"Unable to save income assumptions: {error}")
+            else:
+                st.session_state["income_assumptions"] = income_assumptions
+                st.success(
+                    "Income assumptions saved and applied to the projection."
+                )
 
     modeled_income = build_modeled_income_schedules(
         income_assumptions=_current_income_assumptions()
@@ -1058,7 +1045,7 @@ def _show_social_security() -> None:
     )
 
     current_inputs = _current_social_security_inputs()
-    with st.form("social_security_inputs"):
+    with st.form("social_security_assumptions_form"):
         submitted_inputs = {}
         for name in ("Chris", "Stephanie"):
             current = current_inputs[name]

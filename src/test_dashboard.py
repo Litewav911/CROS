@@ -11,6 +11,7 @@ from app import (
     _overview_rows,
     _transaction_view_data,
 )
+from income_assumptions_store import default_income_assumptions
 from real_retirement_scenario import run_real_retirement_scenario
 
 
@@ -49,7 +50,11 @@ def test_dashboard_overview_uses_applied_plan_assumptions():
     assert rows[0]["Roth conversion"] == Decimal("50000")
 
 
-def test_dashboard_accounts_match_real_retirement_projection():
+def test_dashboard_accounts_match_real_retirement_projection(monkeypatch):
+    monkeypatch.setattr(
+        "app._current_income_assumptions",
+        default_income_assumptions,
+    )
     summary, balances, withdrawals = _account_view_data()
     results = run_real_retirement_scenario()
 
