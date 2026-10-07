@@ -2,7 +2,57 @@ from datetime import date
 from decimal import Decimal
 
 from retirement_engine import RetirementEngineConfig, run_retirement_engine
-from retirement_plan import build_modeled_income_schedules
+from retirement_plan import (
+    apply_rental_passive_loss_limits,
+    build_modeled_income_schedules,
+)
+
+
+def test_rental_passive_losses_carry_forward_against_future_rental_income():
+    taxable_income, carryforward = apply_rental_passive_loss_limits(
+        {
+            2027: Decimal("-10000"),
+            2028: Decimal("3000"),
+            2029: Decimal("10000"),
+        }
+    )
+
+    assert taxable_income == {
+        2027: Decimal("0"),
+        2028: Decimal("0"),
+        2029: Decimal("3000"),
+    }
+    assert carryforward == {
+        2027: Decimal("10000"),
+        2028: Decimal("7000"),
+        2029: Decimal("0"),
+    }
+
+
+def test_rental_loss_schedule_does_not_reduce_other_taxable_income():
+    schedules = build_modeled_income_schedules(
+        start_year=2027,
+        end_year=2028,
+        income_assumptions={
+            "employment": {
+                "Chris": {
+                    "annual_salary": Decimal("50000"),
+                    "last_work_date": date(2028, 12, 31),
+                }
+            },
+            "rental": {"annual_depreciation": Decimal("50000")},
+        },
+    )
+
+    assert schedules["rental_taxable_income"] == {
+        2027: Decimal("0"),
+        2028: Decimal("0"),
+    }
+    assert schedules["rental_loss_carryforward"] == {
+        2027: Decimal("15363.91"),
+        2028: Decimal("30727.82"),
+    }
+    assert schedules["ordinary_income"] == schedules["employment_income"]
 
 
 def test_income_schedules_derive_from_recurring_sources_and_work_dates():

@@ -66,9 +66,23 @@ def parse_csv_content(content: bytes) -> list[dict[str, object]]:
     lines = text.splitlines(keepends=True)
     reader = csv.DictReader(lines)
     required_columns = {"Date", "Description", "Amount"}
-    if reader.fieldnames and len(set(reader.fieldnames)) != len(reader.fieldnames):
+    raw_fieldnames = reader.fieldnames
+    canonical_headers = {
+        "date": "Date",
+        "description": "Description",
+        "amount": "Amount",
+    }
+    normalized_fieldnames = [
+        canonical_headers.get(fieldname.strip().casefold(), fieldname.strip())
+        for fieldname in raw_fieldnames or []
+    ]
+    if len({name.casefold() for name in normalized_fieldnames}) != len(
+        normalized_fieldnames
+    ):
         raise ValueError("CSV column names must be unique.")
-    if not reader.fieldnames or not required_columns.issubset(reader.fieldnames):
+    if not raw_fieldnames or not required_columns.issubset(
+        normalized_fieldnames
+    ):
         raise ValueError(
             "CSV must include the columns Date, Description, and Amount."
         )
@@ -86,10 +100,16 @@ def parse_csv_content(content: bytes) -> list[dict[str, object]]:
             raise ValueError(
                 f"CSV row {line_number}: Row has more values than the header."
             )
+        normalized_row = {
+            normalized: row[original]
+            for original, normalized in zip(
+                raw_fieldnames, normalized_fieldnames
+            )
+        }
 
         try:
             transaction_date = datetime.strptime(
-                (row.get("Date") or "").strip(),
+                (normalized_row.get("Date") or "").strip(),
                 "%Y-%m-%d",
             ).date()
         except ValueError as error:
@@ -97,14 +117,14 @@ def parse_csv_content(content: bytes) -> list[dict[str, object]]:
                 f"CSV row {line_number}: Date must use YYYY-MM-DD."
             ) from error
 
-        description = (row.get("Description") or "").strip()
+        description = (normalized_row.get("Description") or "").strip()
         if not description:
             raise ValueError(
                 f"CSV row {line_number}: Description cannot be empty."
             )
 
         try:
-            amount = Decimal((row.get("Amount") or "").strip())
+            amount = Decimal((normalized_row.get("Amount") or "").strip())
         except InvalidOperation as error:
             raise ValueError(
                 f"CSV row {line_number}: Amount must be a valid number."

@@ -75,6 +75,31 @@ PLAN = RetirementPlan(
 )
 
 
+def apply_rental_passive_loss_limits(
+    taxable_income_by_year: dict[int, Decimal],
+) -> tuple[dict[int, Decimal], dict[int, Decimal]]:
+    """Carry rental losses forward and apply them against later rental income.
+
+    This conservative model does not apply the active-participation special
+    allowance or losses from other passive activities.
+    """
+
+    allowed_income = {}
+    loss_carryforward = {}
+    suspended_loss = Decimal("0")
+    for year, taxable_income in sorted(taxable_income_by_year.items()):
+        taxable_income = Decimal(str(taxable_income))
+        if taxable_income < 0:
+            suspended_loss += -taxable_income
+            allowed_income[year] = Decimal("0")
+        else:
+            offset = min(suspended_loss, taxable_income)
+            suspended_loss -= offset
+            allowed_income[year] = taxable_income - offset
+        loss_carryforward[year] = suspended_loss
+    return allowed_income, loss_carryforward
+
+
 def build_roth_conversion_schedule(
     start_year: int | None = None,
     end_year: int | None = None,
@@ -199,8 +224,8 @@ def build_modeled_income_schedules(
         * Decimal("12")
         - extra_rental_expenses
     )
-    rental_taxable_income = max(
-        Decimal("0"), rental_cashflow - annual_depreciation
+    rental_taxable_income_before_limits = (
+        rental_cashflow - annual_depreciation
     )
 
     employment_by_year = {
@@ -252,6 +277,15 @@ def build_modeled_income_schedules(
     medicare_payroll_tax_by_year = {}
     additional_medicare_tax_by_year = {}
     rental_by_year = {}
+    rental_taxable_income_before_limits_by_year = {
+        year: rental_taxable_income_before_limits
+        for year in range(start_year, end_year + 1)
+    }
+    rental_taxable_income_by_year, rental_loss_carryforward_by_year = (
+        apply_rental_passive_loss_limits(
+            rental_taxable_income_before_limits_by_year
+        )
+    )
     for year in range(start_year, end_year + 1):
         payroll_tax = calculate_employee_payroll_taxes_mfj_2026(
             {
@@ -282,7 +316,7 @@ def build_modeled_income_schedules(
         preferential_income = qualified_dividends + net_long_term_capital_gains
         ordinary_income = (
             employment_by_year[year]
-            + rental_taxable_income
+            + rental_taxable_income_by_year[year]
             + taxable_investment_income
         )
         total_income_for_tax = (
@@ -313,6 +347,11 @@ def build_modeled_income_schedules(
         "medicare_payroll_tax": medicare_payroll_tax_by_year,
         "additional_medicare_tax": additional_medicare_tax_by_year,
         "rental_income": rental_by_year,
+        "rental_taxable_income": rental_taxable_income_by_year,
+        "rental_taxable_income_before_limits": (
+            rental_taxable_income_before_limits_by_year
+        ),
+        "rental_loss_carryforward": rental_loss_carryforward_by_year,
         "taxable_investment_income": investment_by_year,
         "qualified_dividends": qualified_dividends_by_year,
         "net_long_term_capital_gains": capital_gains_by_year,

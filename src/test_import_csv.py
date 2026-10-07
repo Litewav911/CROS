@@ -50,6 +50,19 @@ def test_parse_csv_content_validates_and_preserves_original_rows():
     assert '"Reference":"abc"' in rows[0]["original_data"]
 
 
+def test_parse_csv_content_normalizes_required_header_whitespace_and_case():
+    rows = parse_csv_content(
+        b" date , description , AMOUNT \n"
+        b"2027-01-02,ACME Grocery,-32.50\n"
+    )
+
+    assert len(rows) == 1
+    assert rows[0]["transaction_date"].isoformat() == "2027-01-02"
+    assert rows[0]["description"] == "ACME Grocery"
+    assert str(rows[0]["amount"]) == "-32.50"
+    assert '" date "' in rows[0]["original_data"]
+
+
 @pytest.mark.parametrize(
     ("content", "message"),
     [

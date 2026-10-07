@@ -6,6 +6,7 @@ import sqlite3
 import tempfile
 from pathlib import Path
 
+import altair as alt
 import pandas as pd
 import streamlit as st
 from sqlalchemy.exc import SQLAlchemyError
@@ -393,6 +394,44 @@ def _transaction_view_data(
     }
 
 
+def _category_chart_frame(categories: list[dict[str, object]]) -> pd.DataFrame:
+    frame = pd.DataFrame(categories)
+    if not frame.empty:
+        frame["Spending"] = frame["Spending"].astype(float)
+    return frame
+
+
+def _category_spending_chart(category_frame: pd.DataFrame) -> alt.Chart:
+    return (
+        alt.Chart(category_frame)
+        .mark_bar()
+        .encode(
+            x=alt.X(
+                "Category:N",
+                title="Category",
+                sort=alt.EncodingSortField(
+                    field="Spending",
+                    order="descending",
+                ),
+                axis=alt.Axis(labelAngle=-45),
+            ),
+            y=alt.Y(
+                "Spending:Q",
+                title="Spending ($)",
+                axis=alt.Axis(format="$,.2f"),
+            ),
+            tooltip=[
+                alt.Tooltip("Category:N", title="Category"),
+                alt.Tooltip(
+                    "Spending:Q",
+                    title="Spending",
+                    format="$,.2f",
+                ),
+            ],
+        )
+    )
+
+
 def _transaction_category_options(database_path=DATABASE_PATH) -> list[str]:
     if not database_path.exists():
         return ["Uncategorized"]
@@ -415,6 +454,22 @@ def _transaction_category_options(database_path=DATABASE_PATH) -> list[str]:
         rows = []
 
     return sorted({"Uncategorized", *(row[0] for row in rows)})
+
+
+def _append_category_choice(
+    category_choices: list[str], new_category: str
+) -> tuple[list[str], bool]:
+    category = new_category.strip()
+    if not category:
+        raise ValueError("Enter a category name.")
+    if len(category) > 100:
+        raise ValueError("Category names cannot exceed 100 characters.")
+    if any(
+        existing.casefold() == category.casefold()
+        for existing in category_choices
+    ):
+        return category_choices, False
+    return [*category_choices, category], True
 
 
 def _importable_accounts(database_path=DATABASE_PATH) -> list[dict[str, object]]:
@@ -501,8 +556,52 @@ def _show_csv_import() -> None:
             str(row["Suggested category"])
             for row in preview_rows
         }
-        category_choices = sorted(set(known_categories) | suggestions)
+        existing_categories = sorted(set(known_categories) | suggestions)
+        custom_categories_key = f"csv_custom_categories_{file_digest}"
+        st.session_state.setdefault(custom_categories_key, [])
+        category_choices = sorted(
+            set(existing_categories)
+            | set(st.session_state[custom_categories_key])
+        )
         st.write(f"Review {len(preview_rows)} rows from **{uploaded_file.name}**.")
+        st.caption(
+            "Add a category here, then assign it in the review table. It is "
+            "saved for future imports when you import a transaction with it."
+        )
+        category_input_key = f"csv_new_category_{file_digest}"
+        new_category = st.text_input(
+            "New category",
+            key=category_input_key,
+        )
+        if st.button("Add category", key=f"csv_add_category_{file_digest}"):
+            try:
+                updated_categories, added = _append_category_choice(
+                    category_choices,
+                    new_category,
+                )
+            except ValueError as error:
+                st.error(str(error))
+            else:
+                if added:
+                    st.session_state[custom_categories_key] = sorted(
+                        set(updated_categories) - set(existing_categories)
+                    )
+                    st.session_state[
+                        f"csv_added_category_message_{file_digest}"
+                    ] = f"Added category: {new_category.strip()}"
+                    st.rerun()
+                else:
+                    st.info("That category is already available.")
+        added_category_message = st.session_state.pop(
+            f"csv_added_category_message_{file_digest}", None
+        )
+        if added_category_message:
+            st.success(added_category_message)
+
+        category_choices = sorted(
+            set(existing_categories)
+            | set(st.session_state[custom_categories_key])
+        )
         reviewed = st.data_editor(
             pd.DataFrame(preview_rows),
             hide_index=True,
@@ -657,8 +756,12 @@ def _show_transactions_spending() -> None:
 
     st.subheader("Selected month by category")
     if data["categories"]:
-        category_frame = pd.DataFrame(data["categories"]).set_index("Category")
-        st.bar_chart(category_frame, x_label="Category", y_label="Spending ($)")
+        category_frame = _category_chart_frame(data["categories"])
+        st.altair_chart(
+            _category_spending_chart(category_frame),
+            width="stretch",
+            alt="Selected month expenses by category in dollars",
+        )
     else:
         st.info("No spending transactions were recorded for this month.")
 
@@ -763,9 +866,11 @@ def _show_overview() -> None:
     st.warning(
         "Tax estimates use the income-source assumptions from Retirement "
         "Plan and Social Security. Employee payroll taxes use 2026 rates "
-        "throughout the projection. Rental losses are limited to zero, and "
-        "short-term gains, capital losses, self-employment taxes, and property-"
-        "specific rental tax limits are not modeled."
+        "throughout the projection. Rental losses carry forward against "
+        "future rental income. The active-participation allowance, other "
+        "passive income, and property-specific rental limits are not modeled. "
+        "Short-term gains, capital losses, and self-employment taxes are also "
+        "not modeled."
     )
 
     metrics = st.columns(4)
@@ -972,7 +1077,9 @@ def _show_retirement_plan() -> None:
         st.caption(
             "Property taxes and insurance are already included in the rental "
             "cash flow. Enter additional annual deductible expenses and "
-            "noncash depreciation for all modeled properties."
+            "noncash depreciation for all modeled properties. Rental losses "
+            "carry forward against future rental income; the active-"
+            "participation allowance is not modeled."
         )
         rental_columns = st.columns(2)
         annual_rental_expenses = rental_columns[0].number_input(
@@ -1051,6 +1158,12 @@ def _show_retirement_plan() -> None:
                         - modeled_income["payroll_tax"][year]
                     ),
                     "Net rental cash flow": modeled_income["rental_income"][year],
+                    "Taxable rental income": modeled_income[
+                        "rental_taxable_income"
+                    ][year],
+                    "Rental loss carryforward": modeled_income[
+                        "rental_loss_carryforward"
+                    ][year],
                     "Taxable investment income": modeled_income[
                         "taxable_investment_income"
                     ][year],
@@ -1074,6 +1187,8 @@ def _show_retirement_plan() -> None:
                 "Payroll taxes",
                 "Net employment income",
                 "Net rental cash flow",
+                "Taxable rental income",
+                "Rental loss carryforward",
                 "Taxable investment income",
                 "Qualified dividends",
                 "Net long-term capital gains",

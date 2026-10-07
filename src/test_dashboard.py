@@ -4,15 +4,63 @@ from pathlib import Path
 import sqlite3
 import tempfile
 
+import pytest
+
 from app import (
     SECTIONS,
+    _append_category_choice,
     _account_view_data,
     _available_transaction_years,
+    _category_chart_frame,
+    _category_spending_chart,
     _overview_rows,
     _transaction_view_data,
 )
 from income_assumptions_store import default_income_assumptions
 from real_retirement_scenario import run_real_retirement_scenario
+
+
+def test_new_category_is_trimmed_and_added_to_import_choices():
+    choices, added = _append_category_choice(
+        ["Groceries", "Uncategorized"],
+        "  Pet care  ",
+    )
+
+    assert added
+    assert choices == ["Groceries", "Uncategorized", "Pet care"]
+
+
+def test_new_category_matching_existing_category_is_not_added_twice():
+    choices, added = _append_category_choice(
+        ["Groceries", "Uncategorized"],
+        " groceries ",
+    )
+
+    assert not added
+    assert choices == ["Groceries", "Uncategorized"]
+
+
+def test_new_category_rejects_empty_and_oversized_names():
+    with pytest.raises(ValueError, match="Enter a category name"):
+        _append_category_choice(["Groceries"], "  ")
+
+    with pytest.raises(ValueError, match="cannot exceed 100 characters"):
+        _append_category_choice(["Groceries"], "x" * 101)
+
+
+def test_category_spending_chart_formats_axis_and_tooltip_as_currency():
+    chart_frame = _category_chart_frame(
+        [{"Category": "Insurance", "Spending": Decimal("24215.00")}]
+    )
+    chart = _category_spending_chart(chart_frame).to_dict()
+
+    assert chart["encoding"]["y"]["axis"]["format"] == "$,.2f"
+    spending_tooltip = next(
+        item
+        for item in chart["encoding"]["tooltip"]
+        if item["field"] == "Spending"
+    )
+    assert spending_tooltip["format"] == "$,.2f"
 
 
 def test_dashboard_sections_match_established_navigation():
@@ -130,6 +178,12 @@ def test_dashboard_transactions_apply_category_overrides_and_summarize():
             {"Category": "Groceries", "Spending": Decimal("100")},
             {"Category": "Utilities", "Spending": Decimal("50")},
         ]
+        chart_frame = _category_chart_frame(data["categories"])
+        assert chart_frame["Spending"].tolist() == [100.0, 50.0]
+        assert all(
+            isinstance(amount, float)
+            for amount in chart_frame["Spending"].tolist()
+        )
         assert data["transactions"][1]["Category"] == "Groceries"
     finally:
         database_path.unlink(missing_ok=True)
